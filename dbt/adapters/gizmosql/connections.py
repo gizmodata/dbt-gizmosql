@@ -1,11 +1,16 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
-import dbt.common.exceptions # noqa
-from dbt.adapters.base import Credentials
 
-from dbt.adapters.sql import SQLConnectionManager as connection_cls
+import dbt.adapters.exceptions
+import dbt.exceptions  # noqa
+from adbc_driver_flightsql import dbapi as gizmosql, DatabaseOptions
+from dbt.adapters.base.connections import AdapterResponse
+from dbt.adapters.contracts.connection import Connection, ConnectionState, Credentials
+from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.sql import SQLConnectionManager
 
-from dbt.logger import GLOBAL_LOGGER as logger
+logger = AdapterLogger("GizmoSQL")
+
 
 @dataclass
 class GizmoSQLCredentials(Credentials):
@@ -15,15 +20,21 @@ class GizmoSQLCredentials(Credentials):
     """
 
     # Add credentials members here, like:
-    # host: str
-    # port: int
-    # username: str
-    # password: str
+    host: str
+    username: str
+    password: str
+    port: int = 31337
+    use_encryption: bool = True
+    tls_skip_verify: bool = False
+    catalog: str = None
 
     _ALIASES = {
-        "dbname":"database",
-        "pass":"password",
-        "user":"username"
+        "dbname": "catalog",
+        "database": "catalog",
+        "pass": "password",
+        "user": "username",
+        "use_tls": "use_encryption",
+        "disable_certificate_verification": "tls_skip_verify",
     }
 
     @property
@@ -43,80 +54,80 @@ class GizmoSQLCredentials(Credentials):
         """
         List of keys to display in the `dbt debug` output.
         """
-        return ("host","port","username","user")
+        return ("host", "port", "username", "user", "use_encryption", "tls_skip_verify", "catalog")
 
-class GizmoSQLConnectionManager(connection_cls):
+
+class GizmoSQLConnectionManager(SQLConnectionManager):
     TYPE = "gizmosql"
 
+    @classmethod
+    def open(cls, connection: Connection) -> Connection:
+        if connection.state == ConnectionState.OPEN:
+            logger.debug("Connection is already open, skipping open.")
+            return connection
 
-    @contextmanager
-    def exception_handler(self, sql: str):
-        """
-        Returns a context manager, that will handle exceptions raised
-        from queries, catch, log, and raise dbt exceptions it knows how to handle.
-        """
-        # ## Example ##
-        # try:
-        #     yield
-        # except myadapter_library.DatabaseError as exc:
-        #     self.release(connection_name)
+        credentials = connection.credentials
+        tls_string = ""
+        if credentials.use_encryption:
+            tls_string = "+tls"
 
-        #     logger.debug("myadapter error: {}".format(str(e)))
-        #     raise dbt.exceptions.DatabaseException(str(exc))
-        # except Exception as exc:
-        #     logger.debug("Error running SQL: {}".format(sql))
-        #     logger.debug("Rolling back transaction.")
-        #     self.release(connection_name)
-        #     raise dbt.exceptions.RuntimeException(str(exc))
-        pass
+        connect_kwargs = dict(uri=f"grpc{tls_string}://{credentials.host}:{credentials.port}",
+                              db_kwargs={"username": credentials.username,
+                                         "password": credentials.password,
+                                         DatabaseOptions.TLS_SKIP_VERIFY.value: str(
+                                             credentials.tls_skip_verify).lower(),
+                                         },
+                              autocommit=False
+                              )
+        if credentials.database:
+            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": credentials.database})
+
+        try:
+            handle = gizmosql.connect(
+                **connect_kwargs
+            )
+            connection.state = ConnectionState.OPEN
+            connection.handle = handle
+        except RuntimeError as e:
+            logger.debug(f"Got an error when attempting to connect to DuckDB: '{e}'")
+            connection.handle = None
+            connection.state = ConnectionState.FAIL
+            raise dbt.adapters.exceptions.FailedToConnectError(str(e))
+        return connection
 
     @classmethod
-    def open(cls, connection):
-        """
-        Receives a connection object and a Credentials object
-        and moves it to the "open" state.
-        """
-        # ## Example ##
-        # if connection.state == "open":
-        #     logger.debug("Connection is already open, skipping open.")
-        #     return connection
+    def close(cls, connection: Connection) -> Connection:
+        # if the connection is in closed or init, there's nothing to do
+        if connection.state in {ConnectionState.CLOSED, ConnectionState.INIT}:
+            return connection
 
-        # credentials = connection.credentials
-
-        # try:
-        #     handle = myadapter_library.connect(
-        #         host=credentials.host,
-        #         port=credentials.port,
-        #         username=credentials.username,
-        #         password=credentials.password,
-        #         catalog=credentials.database
-        #     )
-        #     connection.state = "open"
-        #     connection.handle = handle
-        # return connection
-        pass
+        connection = super(SQLConnectionManager, cls).close(connection)
+        return connection
 
     @classmethod
-    def get_response(cls,cursor):
-        """
-        Gets a cursor object and returns adapter-specific information
-        about the last executed command generally a AdapterResponse ojbect
-        that has items such as code, rows_affected,etc. can also just be a string ex. "OK"
-        if your cursor does not offer rich metadata.
-        """
-        # ## Example ##
-        # return cursor.status_message
-        pass
+    def get_response(cls, cursor) -> AdapterResponse:
+        message = "OK"
+        return AdapterResponse(_message=message)
 
     def cancel(self, connection):
         """
         Gets a connection object and attempts to cancel any ongoing queries.
         """
-        # ## Example ##
-        # tid = connection.handle.transaction_id()
-        # sql = "select cancel_transaction({})".format(tid)
-        # logger.debug("Cancelling query "{}" ({})".format(connection_name, pid))
-        # _, cursor = self.add_query(sql, "master")
-        # res = cursor.fetchone()
-        # logger.debug("Canceled query "{}": {}".format(connection_name, res))
-        pass
+        connection.handle.adbc_cancel()
+        logger.debug(f"query cancelled on connection {connection.name}")
+
+    @contextmanager
+    def exception_handler(self, sql: str, connection_name="master"):
+        try:
+            yield
+        except dbt.exceptions.DbtRuntimeError:
+            raise
+        except RuntimeError as e:
+            logger.debug("duckdb error: {}".format(str(e)))
+            logger.debug("Error running SQL: {}".format(sql))
+            # Preserve original RuntimeError with full context instead of swallowing
+            raise dbt.exceptions.DbtRuntimeError(str(e)) from e
+        except Exception as exc:
+            logger.debug("Error running SQL: {}".format(sql))
+            logger.debug("Rolling back transaction.")
+            raise dbt.exceptions.DbtRuntimeError(str(exc)) from exc

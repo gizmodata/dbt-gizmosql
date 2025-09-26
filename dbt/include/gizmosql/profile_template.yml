@@ -4,15 +4,21 @@ prompts:
   host:
     hint: "your host name"
   port:
-    default: 5432
+    default: 31337
     type: "int"
   user:
     hint: "dev username"
   password:
     hint: "dev password"
     hide_input: true
-  dbname:
-    hint: "default database"
+  catalog:
+    hint: "default catalog"
+  use_encryption:
+    type: "bool"
+    default: True
+  tls_skip_verify:
+    type: "bool"
+    default: False
   threads:
     hint: "1 or more"
     type: "int"
