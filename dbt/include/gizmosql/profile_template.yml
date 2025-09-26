@@ -13,6 +13,10 @@ prompts:
     hide_input: true
   catalog:
     hint: "default catalog"
+  database:
+    hint: "default database"
+  schema:
+    hint: "default schema"
   use_encryption:
     type: "bool"
     default: True

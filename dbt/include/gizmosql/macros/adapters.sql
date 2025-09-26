@@ -41,3 +41,9 @@
 {% macro gizmosql__current_timestamp() -%}
   now()
 {%- endmacro %}
+
+{% macro gizmosql__create_schema(relation) -%}
+  {%- set db = relation.database -%}
+  {%- set fixed = relation.incorporate(database=db) -%}
+  create schema if not exists {{ fixed.without_identifier() }}
+{%- endmacro %}

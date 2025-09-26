@@ -1,4 +1,4 @@
-# install latest changes in dbt-core
+dbt-tests-adapter==1.18.*
 black==24.2.0
 bumpversion
 flake8

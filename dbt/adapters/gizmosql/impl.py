@@ -18,5 +18,3 @@ class GizmoSQLAdapter(adapter_cls):
         Returns canonical date func
         """
         return "datenow()"
-
- # may require more build out to make more user friendly to confer with team and community.

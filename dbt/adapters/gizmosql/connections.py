@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import dbt.adapters.exceptions
 import dbt.exceptions  # noqa
@@ -8,29 +8,27 @@ from dbt.adapters.base.connections import AdapterResponse
 from dbt.adapters.contracts.connection import Connection, ConnectionState, Credentials
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.sql import SQLConnectionManager
+from pydantic import Field
+from typing import Optional
+
 
 logger = AdapterLogger("GizmoSQL")
 
 
 @dataclass
 class GizmoSQLCredentials(Credentials):
-    """
-    Defines database specific credentials that get added to
-    profiles.yml to connect to new adapter
-    """
+    database: str = ""          # default so it's not required
+    schema: str = "main"
 
-    # Add credentials members here, like:
-    host: str
-    username: str
-    password: str
-    port: int = 31337
-    use_encryption: bool = True
-    tls_skip_verify: bool = False
-    catalog: str = None
+    host: str = field(kw_only=True)
+    username: str = field(kw_only=True)
+    password: str = field(kw_only=True)
+    port: int = field(default=31337, kw_only=True)
+    use_encryption: bool = field(default=True, kw_only=True)
+    tls_skip_verify: bool = field(default=False, kw_only=True)
+    catalog: Optional[str] = field(default=None, kw_only=True)
 
     _ALIASES = {
-        "dbname": "catalog",
-        "database": "catalog",
         "pass": "password",
         "user": "username",
         "use_tls": "use_encryption",
@@ -54,7 +52,7 @@ class GizmoSQLCredentials(Credentials):
         """
         List of keys to display in the `dbt debug` output.
         """
-        return ("host", "port", "username", "user", "use_encryption", "tls_skip_verify", "catalog")
+        return ("host", "port", "schema", "database", "user", "catalog", "use_encryption", "tls_skip_verify")
 
 
 class GizmoSQLConnectionManager(SQLConnectionManager):
@@ -66,7 +64,7 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             logger.debug("Connection is already open, skipping open.")
             return connection
 
-        credentials = connection.credentials
+        credentials: GizmoSQLCredentials = connection.credentials
         tls_string = ""
         if credentials.use_encryption:
             tls_string = "+tls"
@@ -79,21 +77,26 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
                                          },
                               autocommit=False
                               )
-        if credentials.database:
-            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": credentials.database})
+        if credentials.catalog:
+            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": credentials.catalog})
 
         try:
             handle = gizmosql.connect(
                 **connect_kwargs
             )
-            connection.state = ConnectionState.OPEN
+            credentials.catalog = getattr(handle, "adbc_current_catalog")
+            credentials.database = credentials.catalog
+
             connection.handle = handle
+            connection.state = ConnectionState.OPEN
+
+            return connection
+
         except RuntimeError as e:
-            logger.debug(f"Got an error when attempting to connect to DuckDB: '{e}'")
+            logger.debug(f"Got an error when attempting to connect to GizmoSQL: '{e}'")
             connection.handle = None
             connection.state = ConnectionState.FAIL
             raise dbt.adapters.exceptions.FailedToConnectError(str(e))
-        return connection
 
     @classmethod
     def close(cls, connection: Connection) -> Connection:
@@ -123,7 +126,7 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
         except dbt.exceptions.DbtRuntimeError:
             raise
         except RuntimeError as e:
-            logger.debug("duckdb error: {}".format(str(e)))
+            logger.debug("GizmoSQL error: {}".format(str(e)))
             logger.debug("Error running SQL: {}".format(sql))
             # Preserve original RuntimeError with full context instead of swallowing
             raise dbt.exceptions.DbtRuntimeError(str(e)) from e
