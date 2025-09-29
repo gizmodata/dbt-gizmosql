@@ -13,7 +13,9 @@ An [dbt](https://www.getdbt.com/product/what-is-dbt) adapter for [GizmoSQL](http
 dbt is the T in ELT. Organize, cleanse, denormalize, filter, rename, and pre-aggregate the raw data in your warehouse so that it's ready for analysis.
 
 ## GizmoSQL
-This repo contains the base code to help you start to build out your dbt-gizmosql adapter plugin, for more information on how to build out the adapter please follow the [docs](https://docs.getdbt.com/docs/contributing/building-a-new-adapter)
+GizmoSQL is an Apache Arrow Flight-based SQL engine for data warehouses. It is designed to be fast, scalable, and easy to use.
+
+It has DuckDB and SQLite back-ends.  You can see more information about GizmoSQL [here](https://gizmodata.com/gizmosql).
 
 ### Installation
 

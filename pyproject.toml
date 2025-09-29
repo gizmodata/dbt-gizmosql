@@ -6,8 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "dbt-gizmosql"
 version = "1.10.0"
 description = "The GizmoSQL adapter plugin for dbt"
+readme = "README.md"
 authors = [{ name = "Philip Moore", email = "philip@gizmodata.com" }]
-readme = { text = "The GizmoSQL adapter plugin for dbt", content-type = "text/plain" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+]
+keywords = ["dbt", "gizmosql", "flightsql", "duckdb", "adbc", "gizmodata"]
 dependencies = [
   "dbt-core~=1.10.0",
   "dbt-common~=1.32.0",

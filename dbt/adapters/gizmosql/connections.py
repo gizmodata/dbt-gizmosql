@@ -1,3 +1,4 @@
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Tuple, Any
@@ -9,7 +10,7 @@ from dbt.adapters.base.connections import AdapterResponse
 from dbt.adapters.contracts.connection import Connection, ConnectionState, Credentials
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.sql import SQLConnectionManager
-import time
+
 from dbt.adapters.gizmosql.connection_proxy import wrap_with_autoclosing_cursors
 
 logger = AdapterLogger("GizmoSQL")
@@ -112,6 +113,11 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             )
             connection.handle = wrap_with_autoclosing_cursors(handle)
             connection.state = ConnectionState.OPEN
+
+            vendor_version = connection.handle.adbc_get_info().get("vendor_version")
+
+            if not re.search(pattern="^duckdb ", string=vendor_version):
+                raise RuntimeError(f"Unsupported GizmoSQL server backend: '{vendor_version}'")
 
             return connection
 
