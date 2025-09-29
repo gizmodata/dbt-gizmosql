@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import Tuple, Any
 
 import dbt.adapters.exceptions
 import dbt.exceptions  # noqa
@@ -7,11 +8,9 @@ from adbc_driver_flightsql import dbapi as gizmosql, DatabaseOptions
 from dbt.adapters.base.connections import AdapterResponse
 from dbt.adapters.contracts.connection import Connection, ConnectionState, Credentials
 from dbt.adapters.events.logging import AdapterLogger
-from dbt.adapters.record.cursor import cursor
 from dbt.adapters.sql import SQLConnectionManager
-from pydantic import Field
-from typing import Optional, Tuple
-
+import time
+from dbt.adapters.gizmosql.connection_proxy import wrap_with_autoclosing_cursors
 
 logger = AdapterLogger("GizmoSQL")
 
@@ -54,10 +53,10 @@ class GizmoSQLCredentials(Credentials):
                                   )
 
             if self.database:
-                connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": f'"{self.database}"'})
+                connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": self.database})
 
             with gizmosql.connect(
-                **connect_kwargs
+                    **connect_kwargs
             ) as conn:
                 self.database = self.database or getattr(conn, "adbc_current_catalog")
                 self.schema = self.schema or getattr(conn, "adbc_current_schema")
@@ -105,13 +104,13 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
                               autocommit=True
                               )
         if credentials.database:
-            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": f'"{credentials.database}"'})
+            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": credentials.database})
 
         try:
             handle = gizmosql.connect(
                 **connect_kwargs
             )
-            connection.handle = handle
+            connection.handle = wrap_with_autoclosing_cursors(handle)
             connection.state = ConnectionState.OPEN
 
             return connection
@@ -122,6 +121,19 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             connection.state = ConnectionState.FAIL
             raise dbt.adapters.exceptions.FailedToConnectError(str(e))
 
+    def add_begin_query(self):
+        return self.add_query("BEGIN", auto_begin=False)
+
+    def add_commit_query(self):
+        result = self.add_query("COMMIT", auto_begin=False)
+        # Force a checkpoint to ensure the changes are visible to other connections
+        _ = self.add_query("CHECKPOINT", auto_begin=False)
+        return result
+
+    def add_select_query(self, sql: str) -> Tuple[Connection, Any]:
+        sql = self._add_query_comment(sql)
+        return self.add_query(sql, auto_begin=False)
+
     @classmethod
     def close(cls, connection: Connection) -> Connection:
         # if the connection is in closed or init, there's nothing to do
@@ -129,12 +141,11 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             return connection
 
         connection.handle.adbc_cancel()
-        connection = super(SQLConnectionManager, cls).close(connection)
+        connection = super().close(connection)
         return connection
 
     @classmethod
     def get_response(cls, cursor) -> AdapterResponse:
-
         message = "OK"
         return AdapterResponse(_message=message)
 

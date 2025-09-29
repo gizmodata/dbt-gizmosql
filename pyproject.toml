@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dbt-gizmosql"
+version = "1.10.0"
+description = "The GizmoSQL adapter plugin for dbt"
+authors = [{ name = "Philip Moore", email = "philip@gizmodata.com" }]
+readme = { text = "The GizmoSQL adapter plugin for dbt", content-type = "text/plain" }
+dependencies = [
+  "dbt-core~=1.10.0",
+  "dbt-common~=1.32.0",
+  "dbt-adapters~=1.16.0",
+  "adbc-driver-flightsql~=1.8.0",
+  "pyarrow==21.0.*"
+]
+[project.optional-dependencies]
+dev = [
+    "bumpver",
+    "pip-tools",
+    "pytest",
+    "dbt-tests-adapter==1.18.*",
+    "black==24.2.0",
+    "bumpversion",
+    "flake8",
+    "flaky",
+    "freezegun==1.4.0",
+    "ipdb",
+    "mypy==1.8.0",
+    "pre-commit",
+    "pytest-dotenv",
+    "pytest-logbook",
+    "pytest-csv",
+    "pytest-xdist",
+    "pytz",
+    "tox>=3.13",
+    "twine",
+    "wheel",
+    "docker"
+]
+
+[project.urls]
+Homepage = "https://github.com/gizmodata/dbt-gizmosql"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+namespaces = true
+include = ["dbt", "dbt.*"]
