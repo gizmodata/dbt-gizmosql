@@ -17,7 +17,6 @@ dependencies = [
 ]
 [project.optional-dependencies]
 dev = [
-    "bumpver",
     "pip-tools",
     "pytest",
     "dbt-tests-adapter==1.18.*",
