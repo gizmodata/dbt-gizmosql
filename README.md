@@ -15,7 +15,66 @@ dbt is the T in ELT. Organize, cleanse, denormalize, filter, rename, and pre-agg
 ## GizmoSQL
 This repo contains the base code to help you start to build out your dbt-gizmosql adapter plugin, for more information on how to build out the adapter please follow the [docs](https://docs.getdbt.com/docs/contributing/building-a-new-adapter)
 
-** Note ** this `README` is meant to be replaced with what information would be required to use your adpater once your at a point todo so.
+### Installation
+
+#### Option 1 - from PyPi
+```shell
+# Create the virtual environment
+python3 -m venv .venv
+
+# Activate the virtual environment
+. .venv/bin/activate
+
+pip install --upgrade pip
+
+python -m pip install dbt-core dbt-gizmosql
+```
+
+#### Option 2 - from source - for development of the adapter
+```shell
+git clone https://github.com/gizmodata/dbt-gizmosql
+
+cd dbt-gizmosql
+
+# Create the virtual environment
+python3 -m venv .venv
+
+# Activate the virtual environment
+. .venv/bin/activate
+
+# Upgrade pip, setuptools, and wheel
+pip install --upgrade pip setuptools wheel
+
+# Install the dbt GizmoSQL adapter - in editable mode with dev dependencies
+pip install --editable .[dev]
+```
+
+### Usage of the dbt GizmoSQL adapter
+
+#### Option 1: dbt init
+You can setup the adapter by running `dbt init` - and choosing values that the wizard prompts you for.   
+
+Then you can run by going into the directory for the project you just created:
+```bash
+dbt run
+```
+
+#### Option 2: Setup dbt.profiles.yml
+Add something like the following to your `~/.dbt.profiles.yml` file (change the values to match your environment):
+```yaml
+my-gizmosql-db:
+  target: dev
+  outputs:
+    dev:
+      type: gizmosql
+      host: localhost
+      port: 31337
+      user: [username]
+      password: [password]
+      use_encryption: True
+      tls_skip_verify: True
+      threads: 2
+```
 
 ** Note **
 ### Adapter Scaffold default Versioning

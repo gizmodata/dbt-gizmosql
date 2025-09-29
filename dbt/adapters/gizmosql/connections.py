@@ -17,8 +17,8 @@ logger = AdapterLogger("GizmoSQL")
 
 @dataclass
 class GizmoSQLCredentials(Credentials):
-    database: str | None = None
-    schema: str | None = None
+    database: str = ""
+    schema: str = ""
 
     host: str = field(kw_only=True)
     username: str = field(kw_only=True)
@@ -59,7 +59,7 @@ class GizmoSQLCredentials(Credentials):
                     **connect_kwargs
             ) as conn:
                 self.database = self.database or getattr(conn, "adbc_current_catalog")
-                self.schema = self.schema or getattr(conn, "adbc_current_schema")
+                self.schema = self.schema or getattr(conn, "adbc_current_db_schema")
 
     @property
     def type(self):

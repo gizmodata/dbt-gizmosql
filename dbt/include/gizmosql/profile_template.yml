@@ -13,14 +13,16 @@ prompts:
     hide_input: true
   database:
     hint: "default database"
+    default: ""
   schema:
     hint: "default schema"
+    default: ""
   use_encryption:
     type: "bool"
     default: True
   tls_skip_verify:
     type: "bool"
-    default: False
+    default: True
   threads:
     hint: "1 or more"
     type: "int"
