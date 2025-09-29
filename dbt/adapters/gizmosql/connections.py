@@ -7,9 +7,10 @@ from adbc_driver_flightsql import dbapi as gizmosql, DatabaseOptions
 from dbt.adapters.base.connections import AdapterResponse
 from dbt.adapters.contracts.connection import Connection, ConnectionState, Credentials
 from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.record.cursor import cursor
 from dbt.adapters.sql import SQLConnectionManager
 from pydantic import Field
-from typing import Optional
+from typing import Optional, Tuple
 
 
 logger = AdapterLogger("GizmoSQL")
@@ -17,8 +18,8 @@ logger = AdapterLogger("GizmoSQL")
 
 @dataclass
 class GizmoSQLCredentials(Credentials):
-    database: str = ""          # default so it's not required
-    schema: str = "main"
+    database: str | None = None
+    schema: str | None = None
 
     host: str = field(kw_only=True)
     username: str = field(kw_only=True)
@@ -26,14 +27,40 @@ class GizmoSQLCredentials(Credentials):
     port: int = field(default=31337, kw_only=True)
     use_encryption: bool = field(default=True, kw_only=True)
     tls_skip_verify: bool = field(default=False, kw_only=True)
-    catalog: Optional[str] = field(default=None, kw_only=True)
 
     _ALIASES = {
+        "catalog": "database",
+        "dbname": "database",
         "pass": "password",
         "user": "username",
         "use_tls": "use_encryption",
         "disable_certificate_verification": "tls_skip_verify",
     }
+
+    def __post_init__(self):
+        # Set the default database and schema if they are not set by retrieving them from the server
+        if not self.database or not self.schema:
+            tls_string = ""
+            if self.use_encryption:
+                tls_string = "+tls"
+
+            connect_kwargs = dict(uri=f"grpc{tls_string}://{self.host}:{self.port}",
+                                  db_kwargs={"username": self.username,
+                                             "password": self.password,
+                                             DatabaseOptions.TLS_SKIP_VERIFY.value: str(
+                                                 self.tls_skip_verify).lower(),
+                                             },
+                                  autocommit=True
+                                  )
+
+            if self.database:
+                connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": f'"{self.database}"'})
+
+            with gizmosql.connect(
+                **connect_kwargs
+            ) as conn:
+                self.database = self.database or getattr(conn, "adbc_current_catalog")
+                self.schema = self.schema or getattr(conn, "adbc_current_schema")
 
     @property
     def type(self):
@@ -52,7 +79,7 @@ class GizmoSQLCredentials(Credentials):
         """
         List of keys to display in the `dbt debug` output.
         """
-        return ("host", "port", "schema", "database", "user", "catalog", "use_encryption", "tls_skip_verify")
+        return ("host", "port", "schema", "database", "user", "use_encryption", "tls_skip_verify")
 
 
 class GizmoSQLConnectionManager(SQLConnectionManager):
@@ -75,18 +102,15 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
                                          DatabaseOptions.TLS_SKIP_VERIFY.value: str(
                                              credentials.tls_skip_verify).lower(),
                                          },
-                              autocommit=False
+                              autocommit=True
                               )
-        if credentials.catalog:
-            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": credentials.catalog})
+        if credentials.database:
+            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": f'"{credentials.database}"'})
 
         try:
             handle = gizmosql.connect(
                 **connect_kwargs
             )
-            credentials.catalog = getattr(handle, "adbc_current_catalog")
-            credentials.database = credentials.catalog
-
             connection.handle = handle
             connection.state = ConnectionState.OPEN
 
@@ -104,11 +128,13 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
         if connection.state in {ConnectionState.CLOSED, ConnectionState.INIT}:
             return connection
 
+        connection.handle.adbc_cancel()
         connection = super(SQLConnectionManager, cls).close(connection)
         return connection
 
     @classmethod
     def get_response(cls, cursor) -> AdapterResponse:
+
         message = "OK"
         return AdapterResponse(_message=message)
 

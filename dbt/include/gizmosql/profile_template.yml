@@ -11,8 +11,6 @@ prompts:
   password:
     hint: "dev password"
     hide_input: true
-  catalog:
-    hint: "default catalog"
   database:
     hint: "default database"
   schema:

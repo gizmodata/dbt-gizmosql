@@ -20,6 +20,7 @@ setup(
         "dbt-core~=1.10.0",
         "dbt-common~=1.32.0",
         "dbt-adapters~=1.16.0",
-        "adbc-driver-flightsql~=1.8.0"
+        "adbc-driver-flightsql~=1.8.0",
+        "pyarrow==21.0.*"
     ],
 )

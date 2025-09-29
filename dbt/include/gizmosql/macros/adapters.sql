@@ -6,7 +6,7 @@
           character_maximum_length,
           numeric_precision,
           numeric_scale
-      from {{ relation.information_schema('columns') }}
+      from information_schema.columns
       where table_name = '{{ relation.identifier }}'
         {% if relation.schema %}
         and table_schema = '{{ relation.schema }}'
@@ -42,8 +42,23 @@
   now()
 {%- endmacro %}
 
-{% macro gizmosql__create_schema(relation) -%}
-  {%- set db = relation.database -%}
-  {%- set fixed = relation.incorporate(database=db) -%}
-  create schema if not exists {{ fixed.without_identifier() }}
+{% macro gizmosql__information_schema_name(database=None) -%}
+  information_schema
 {%- endmacro %}
+
+{% macro gizmosql__list_schemas(database=None) -%}
+    select distinct schema_name
+    from information_schema.schemata
+    where catalog_name = CURRENT_CATALOG()
+{%- endmacro %}
+
+{% macro gizmosql__get_binding_char() %}
+  {{ return('?') }}
+{% endmacro %}
+
+{% macro gizmosql__rename_relation(from_relation, to_relation) -%}
+  {% set target_name = adapter.quote_as_configured(to_relation.identifier, 'identifier') %}
+  {% call statement('rename_relation') -%}
+    alter {{ to_relation.type }} {{ from_relation }} rename to {{ target_name }}
+  {%- endcall %}
+{% endmacro %}
