@@ -36,7 +36,6 @@ dev = [
     "mypy==1.8.0",
     "pre-commit",
     "pytest-dotenv",
-    "pytest-logbook",
     "pytest-csv",
     "pytest-xdist",
     "pytz",
