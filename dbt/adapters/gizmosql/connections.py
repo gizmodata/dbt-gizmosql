@@ -1,7 +1,10 @@
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Tuple, Any
+from typing import TYPE_CHECKING, Tuple, Any, Optional
+
+if TYPE_CHECKING:
+    import agate
 
 import dbt.adapters.exceptions
 import dbt.exceptions  # noqa
@@ -10,8 +13,6 @@ from dbt.adapters.base.connections import AdapterResponse
 from dbt.adapters.contracts.connection import Connection, ConnectionState, Credentials
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.sql import SQLConnectionManager
-
-from dbt.adapters.gizmosql.connection_proxy import wrap_with_autoclosing_cursors
 
 logger = AdapterLogger("GizmoSQL")
 
@@ -50,7 +51,7 @@ class GizmoSQLCredentials(Credentials):
                                              DatabaseOptions.TLS_SKIP_VERIFY.value: str(
                                                  self.tls_skip_verify).lower(),
                                              },
-                                  autocommit=True
+                                  autocommit=False
                                   )
 
             if self.database:
@@ -108,10 +109,9 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": credentials.database})
 
         try:
-            handle = gizmosql.connect(
+            connection.handle = handle = gizmosql.connect(
                 **connect_kwargs
             )
-            connection.handle = wrap_with_autoclosing_cursors(handle)
             connection.state = ConnectionState.OPEN
 
             vendor_version = connection.handle.adbc_get_info().get("vendor_version")
@@ -131,10 +131,34 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
         return self.add_query("BEGIN", auto_begin=False)
 
     def add_commit_query(self):
-        result = self.add_query("COMMIT", auto_begin=False)
+        connection, cursor = self.add_query("COMMIT", auto_begin=False)
+        # Close the cursor to release the lock before issuing CHECKPOINT
+        cursor.close()
         # Force a checkpoint to ensure the changes are visible to other connections
-        _ = self.add_query("CHECKPOINT", auto_begin=False)
-        return result
+        _, checkpoint_cursor = self.add_query("CHECKPOINT", auto_begin=False)
+        checkpoint_cursor.close()
+        return connection, cursor
+
+    def execute(
+        self,
+        sql: str,
+        auto_begin: bool = False,
+        fetch: bool = False,
+        limit: Optional[int] = None,
+    ) -> Tuple[AdapterResponse, "agate.Table"]:
+        from dbt_common.clients.agate_helper import empty_table
+
+        sql = self._add_query_comment(sql)
+        _, cursor = self.add_query(sql, auto_begin)
+        try:
+            response = self.get_response(cursor)
+            if fetch:
+                table = self.get_result_from_cursor(cursor, limit)
+            else:
+                table = empty_table()
+            return response, table
+        finally:
+            cursor.close()
 
     def add_select_query(self, sql: str) -> Tuple[Connection, Any]:
         sql = self._add_query_comment(sql)
@@ -146,7 +170,10 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
         if connection.state in {ConnectionState.CLOSED, ConnectionState.INIT}:
             return connection
 
-        connection.handle.adbc_cancel()
+        try:
+            connection.handle.adbc_cancel()
+        except Exception:
+            pass
         connection = super().close(connection)
         return connection
 

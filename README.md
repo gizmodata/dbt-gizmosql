@@ -80,7 +80,7 @@ my-gizmosql-db:
 
 ** Note **
 ### Adapter Scaffold default Versioning
-This adapter plugin follows [semantic versioning](https://semver.org/). The first version of this plugin is v1.10.0, in order to be compatible with dbt Core v1.10.0.
+This adapter plugin follows [semantic versioning](https://semver.org/). The version of this plugin is v1.11.x, in order to be compatible with dbt Core v1.11.x.
 
 It's also brand new! For GizmoSQL-specific functionality, we will aim for backwards-compatibility wherever possible. We are likely to be iterating more quickly than most major-version-1 software projects. To that end, backwards-incompatible changes will be clearly communicated and limited to minor versions (once every three months).
 
