@@ -2,9 +2,9 @@ name: dbt-gizmosql-ci
 
 on:
   workflow_dispatch:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
 
 jobs:
   build-n-publish:
