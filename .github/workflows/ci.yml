@@ -3,8 +3,6 @@ name: dbt-gizmosql-ci
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*"
 
 jobs:
   build-n-publish:
