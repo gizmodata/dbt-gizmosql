@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 import dbt.adapters.exceptions
 import dbt.exceptions  # noqa
-from adbc_driver_flightsql import dbapi as gizmosql, DatabaseOptions
+from adbc_driver_gizmosql import dbapi as gizmosql
 from dbt.adapters.base.connections import AdapterResponse
 from dbt.adapters.contracts.connection import Connection, ConnectionState, Credentials
 from dbt.adapters.events.logging import AdapterLogger
@@ -45,20 +45,13 @@ class GizmoSQLCredentials(Credentials):
             if self.use_encryption:
                 tls_string = "+tls"
 
-            connect_kwargs = dict(uri=f"grpc{tls_string}://{self.host}:{self.port}",
-                                  db_kwargs={"username": self.username,
-                                             "password": self.password,
-                                             DatabaseOptions.TLS_SKIP_VERIFY.value: str(
-                                                 self.tls_skip_verify).lower(),
-                                             },
-                                  autocommit=False
-                                  )
-
-            if self.database:
-                connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": self.database})
-
             with gizmosql.connect(
-                    **connect_kwargs
+                    uri=f"grpc{tls_string}://{self.host}:{self.port}",
+                    username=self.username,
+                    password=self.password,
+                    tls_skip_verify=self.tls_skip_verify,
+                    conn_kwargs={"adbc.connection.catalog": self.database} if self.database else None,
+                    autocommit=False,
             ) as conn:
                 self.database = self.database or getattr(conn, "adbc_current_catalog")
                 self.schema = self.schema or getattr(conn, "adbc_current_db_schema")
@@ -97,20 +90,14 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
         if credentials.use_encryption:
             tls_string = "+tls"
 
-        connect_kwargs = dict(uri=f"grpc{tls_string}://{credentials.host}:{credentials.port}",
-                              db_kwargs={"username": credentials.username,
-                                         "password": credentials.password,
-                                         DatabaseOptions.TLS_SKIP_VERIFY.value: str(
-                                             credentials.tls_skip_verify).lower(),
-                                         },
-                              autocommit=True
-                              )
-        if credentials.database:
-            connect_kwargs.update(conn_kwargs={"adbc.connection.catalog": credentials.database})
-
         try:
-            connection.handle = handle = gizmosql.connect(
-                **connect_kwargs
+            connection.handle = gizmosql.connect(
+                uri=f"grpc{tls_string}://{credentials.host}:{credentials.port}",
+                username=credentials.username,
+                password=credentials.password,
+                tls_skip_verify=credentials.tls_skip_verify,
+                conn_kwargs={"adbc.connection.catalog": credentials.database} if credentials.database else None,
+                autocommit=True,
             )
             connection.state = ConnectionState.OPEN
 
