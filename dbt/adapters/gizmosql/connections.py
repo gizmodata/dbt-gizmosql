@@ -23,11 +23,12 @@ class GizmoSQLCredentials(Credentials):
     schema: str = ""
 
     host: str = field(kw_only=True)
-    username: str = field(kw_only=True)
-    password: str = field(kw_only=True)
+    username: Optional[str] = field(default=None, kw_only=True)
+    password: Optional[str] = field(default=None, kw_only=True)
     port: int = field(default=31337, kw_only=True)
     use_encryption: bool = field(default=True, kw_only=True)
     tls_skip_verify: bool = field(default=False, kw_only=True)
+    auth_type: Optional[str] = field(default=None, kw_only=True)
 
     _ALIASES = {
         "catalog": "database",
@@ -45,14 +46,19 @@ class GizmoSQLCredentials(Credentials):
             if self.use_encryption:
                 tls_string = "+tls"
 
-            with gizmosql.connect(
-                    uri=f"grpc{tls_string}://{self.host}:{self.port}",
-                    username=self.username,
-                    password=self.password,
-                    tls_skip_verify=self.tls_skip_verify,
-                    conn_kwargs={"adbc.connection.catalog": self.database} if self.database else None,
-                    autocommit=False,
-            ) as conn:
+            connect_kwargs = {
+                "uri": f"grpc{tls_string}://{self.host}:{self.port}",
+                "tls_skip_verify": self.tls_skip_verify,
+                "conn_kwargs": {"adbc.connection.catalog": self.database} if self.database else None,
+                "autocommit": False,
+            }
+            if self.auth_type:
+                connect_kwargs["auth_type"] = self.auth_type
+            if self.username:
+                connect_kwargs["username"] = self.username
+                connect_kwargs["password"] = self.password or ""
+
+            with gizmosql.connect(**connect_kwargs) as conn:
                 self.database = self.database or getattr(conn, "adbc_current_catalog")
                 self.schema = self.schema or getattr(conn, "adbc_current_db_schema")
 
@@ -73,7 +79,7 @@ class GizmoSQLCredentials(Credentials):
         """
         List of keys to display in the `dbt debug` output.
         """
-        return ("host", "port", "schema", "database", "user", "use_encryption", "tls_skip_verify")
+        return ("host", "port", "schema", "database", "user", "use_encryption", "tls_skip_verify", "auth_type")
 
 
 class GizmoSQLConnectionManager(SQLConnectionManager):
@@ -91,14 +97,19 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             tls_string = "+tls"
 
         try:
-            connection.handle = gizmosql.connect(
-                uri=f"grpc{tls_string}://{credentials.host}:{credentials.port}",
-                username=credentials.username,
-                password=credentials.password,
-                tls_skip_verify=credentials.tls_skip_verify,
-                conn_kwargs={"adbc.connection.catalog": credentials.database} if credentials.database else None,
-                autocommit=True,
-            )
+            connect_kwargs = {
+                "uri": f"grpc{tls_string}://{credentials.host}:{credentials.port}",
+                "tls_skip_verify": credentials.tls_skip_verify,
+                "conn_kwargs": {"adbc.connection.catalog": credentials.database} if credentials.database else None,
+                "autocommit": True,
+            }
+            if credentials.auth_type:
+                connect_kwargs["auth_type"] = credentials.auth_type
+            if credentials.username:
+                connect_kwargs["username"] = credentials.username
+                connect_kwargs["password"] = credentials.password or ""
+
+            connection.handle = gizmosql.connect(**connect_kwargs)
             connection.state = ConnectionState.OPEN
 
             vendor_version = connection.handle.adbc_get_info().get("vendor_version")

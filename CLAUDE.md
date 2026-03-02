@@ -4,7 +4,7 @@
 dbt-gizmosql is a [dbt](https://www.getdbt.com/) adapter for [GizmoSQL](https://gizmodata.com/gizmosql), an Apache Arrow Flight-based SQL engine with DuckDB and SQLite back-ends.
 
 ## Key Architecture
-- **Driver**: Uses `adbc-driver-gizmosql` (not `adbc-driver-flightsql`) — the GizmoSQL driver wraps Flight SQL with a cleaner `connect()` API
+- **Driver**: Uses `adbc-driver-gizmosql` (not `adbc-driver-flightsql`) — the GizmoSQL driver wraps Flight SQL with a cleaner `connect()` API; supports OAuth/SSO via `auth_type="external"`
 - **Connection**: `dbt/adapters/gizmosql/connections.py` — `GizmoSQLCredentials` and `GizmoSQLConnectionManager`
 - **Adapter**: `dbt/adapters/gizmosql/impl.py` — `GizmoSQLAdapter`
 - **Plugin entry**: `dbt/adapters/gizmosql/__init__.py`

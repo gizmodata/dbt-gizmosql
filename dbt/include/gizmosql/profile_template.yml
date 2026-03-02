@@ -23,6 +23,9 @@ prompts:
   tls_skip_verify:
     type: "bool"
     default: True
+  auth_type:
+    hint: "optional: 'external' for OAuth/SSO"
+    default: ""
   threads:
     hint: "1 or more"
     type: "int"

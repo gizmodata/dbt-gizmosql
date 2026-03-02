@@ -78,6 +78,22 @@ my-gizmosql-db:
       threads: 2
 ```
 
+#### Option 3: OAuth/SSO Authentication
+For browser-based OAuth/SSO, use `auth_type: external` — no username or password needed:
+```yaml
+my-gizmosql-db:
+  target: dev
+  outputs:
+    dev:
+      type: gizmosql
+      host: gizmosql.example.com
+      port: 31337
+      auth_type: external
+      use_encryption: True
+      tls_skip_verify: True
+      threads: 2
+```
+
 ** Note **
 ### Adapter Scaffold default Versioning
 This adapter plugin follows [semantic versioning](https://semver.org/). The version of this plugin is v1.11.x, in order to be compatible with dbt Core v1.11.x.
