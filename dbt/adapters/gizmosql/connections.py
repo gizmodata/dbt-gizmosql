@@ -129,13 +129,7 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
         return self.add_query("BEGIN", auto_begin=False)
 
     def add_commit_query(self):
-        connection, cursor = self.add_query("COMMIT", auto_begin=False)
-        # Close the cursor to release the lock before issuing CHECKPOINT
-        cursor.close()
-        # Force a checkpoint to ensure the changes are visible to other connections
-        _, checkpoint_cursor = self.add_query("CHECKPOINT", auto_begin=False)
-        checkpoint_cursor.close()
-        return connection, cursor
+        return self.add_query("COMMIT", auto_begin=False)
 
     def execute(
         self,
