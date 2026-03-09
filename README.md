@@ -94,6 +94,19 @@ my-gizmosql-db:
       threads: 2
 ```
 
+### Concurrency and Checkpointing
+
+This adapter supports running dbt with multiple threads (`threads: N` in your profile). Each model `COMMIT`s the changes after running, which can produce large WAL files for both GizmoSQL backends (DuckDB and sqlite). If you want to explicitly flush WAL changes into your backend database file, you can use the `CHECKPOINT` operation. `CHECKPOINT` is a storage maintenance operation that flushes WAL data into the main database file, which avoids having to read the WAL file when the file is opened next. Both DuckDB and SQLite perform automatic checkpointing (DuckDB when the WAL reaches 16 MiB by default; SQLite when the WAL reaches 1000 pages by default), so manual checkpointing is generally unnecessary.
+
+If you need to force a checkpoint after all models complete (e.g., to produce a fully self-contained database file before copying it), use a dbt `on-run-end` hook in your `dbt_project.yml`:
+
+```yaml
+on-run-end:
+  - "CHECKPOINT"
+```
+
+DuckDB's `CHECKPOINT` will fail if any transactions are open ([DuckDB CHECKPOINT docs](https://duckdb.org/docs/stable/sql/statements/checkpoint)), which makes it incompatible with concurrent model execution, so you should only run it at the end of your run after all models and tests have completed.
+
 ** Note **
 ### Adapter Scaffold default Versioning
 This adapter plugin follows [semantic versioning](https://semver.org/). The version of this plugin is v1.11.x, in order to be compatible with dbt Core v1.11.x.
