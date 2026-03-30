@@ -29,6 +29,16 @@ def wait_for_container_log(container, timeout=30, poll_interval=1, ready_message
 @pytest.fixture(scope="session")
 def gizmosql_server():
     client = docker.from_env()
+
+    # Reuse existing container if already running (useful for local stress testing)
+    try:
+        existing = client.containers.get("dbt-gizmosql-test")
+        if existing.status == "running":
+            yield existing
+            return
+    except docker.errors.NotFound:
+        pass
+
     container = client.containers.run(
         image="gizmodata/gizmosql:latest",
         name="dbt-gizmosql-test",
