@@ -1,4 +1,5 @@
 import re
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Tuple, Any, Optional
@@ -82,6 +83,13 @@ class GizmoSQLCredentials(Credentials):
         return ("host", "port", "schema", "database", "user", "use_encryption", "tls_skip_verify", "auth_type")
 
 
+_TRANSIENT_CATALOG_ERROR = re.compile(
+    r"Catalog Error:.*does not exist", re.IGNORECASE
+)
+_RETRY_LIMIT = 5
+_RETRY_BACKOFF_SECONDS = 1.0
+
+
 class GizmoSQLConnectionManager(SQLConnectionManager):
     TYPE = "gizmosql"
 
@@ -153,6 +161,51 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             return response, table
         finally:
             cursor.close()
+
+    @classmethod
+    def _is_transient_catalog_error(cls, error: Exception) -> bool:
+        """Check if an error is a transient catalog error from stale Flight SQL metadata."""
+        return bool(_TRANSIENT_CATALOG_ERROR.search(str(error)))
+
+    def add_query(
+        self,
+        sql: str,
+        auto_begin: bool = True,
+        bindings: Optional[Any] = None,
+        abridge_sql_log: bool = False,
+        retryable_exceptions: Tuple = tuple(),
+        retry_limit: int = 1,
+    ) -> Tuple[Connection, Any]:
+        """Override add_query to retry on transient catalog errors.
+
+        Remote GizmoSQL (Flight SQL) uses a prepare-then-execute pattern.
+        The prepare phase validates against the server catalog, which may
+        not yet reflect recently-created relations due to network latency.
+        This causes sporadic "Catalog Error: Table ... does not exist"
+        failures that succeed on retry.
+        """
+        last_error = None
+        for attempt in range(_RETRY_LIMIT):
+            try:
+                return super().add_query(
+                    sql,
+                    auto_begin=auto_begin,
+                    bindings=bindings,
+                    abridge_sql_log=abridge_sql_log,
+                    retryable_exceptions=retryable_exceptions,
+                    retry_limit=retry_limit,
+                )
+            except (dbt.exceptions.DbtRuntimeError, RuntimeError) as e:
+                if not self._is_transient_catalog_error(e):
+                    raise
+                last_error = e
+                delay = _RETRY_BACKOFF_SECONDS * (attempt + 1)
+                logger.debug(
+                    f"Transient catalog error (attempt {attempt + 1}/{_RETRY_LIMIT}), "
+                    f"retrying in {delay:.1f}s: {e}"
+                )
+                time.sleep(delay)
+        raise last_error  # type: ignore[misc]
 
     def add_select_query(self, sql: str) -> Tuple[Connection, Any]:
         sql = self._add_query_comment(sql)

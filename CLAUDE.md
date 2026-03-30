@@ -10,9 +10,11 @@ dbt-gizmosql is a [dbt](https://www.getdbt.com/) adapter for [GizmoSQL](https://
 - **Plugin entry**: `dbt/adapters/gizmosql/__init__.py`
 
 ## Version Bumps
-**IMPORTANT**: Version must be updated in TWO places:
+**IMPORTANT**: Version must be updated in FOUR places:
 1. `pyproject.toml` — `version = "x.y.z"`
 2. `dbt/adapters/gizmosql/__init__.py` — `__version__ = "x.y.z"`
+3. `dbt/adapters/gizmosql/__version__.py` — `version = "x.y.z"`
+4. `dbt/include/gizmosql/dbt_project.yml` — `version: x.y.z`
 
 Version tracks dbt-core (e.g., dbt-core 1.11.x → dbt-gizmosql 1.11.x).
 
