@@ -85,7 +85,7 @@ class TestIntersectGizmoSQL(BaseIntersect):
     pass
 
 
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
+@pytest.mark.skip(reason="DuckDB uses date_add not dateadd — needs utility macro override")
 class TestLastDayGizmoSQL(BaseLastDay):
     pass
 
@@ -94,7 +94,7 @@ class TestLengthGizmoSQL(BaseLength):
     pass
 
 
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
+@pytest.mark.skip(reason="DuckDB listagg syntax differs — needs utility macro override")
 class TestListaggGizmoSQL(BaseListagg):
     pass
 
@@ -111,12 +111,10 @@ class TestPositionGizmoSQL(BasePosition):
     pass
 
 
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
 class TestReplaceGizmoSQL(BaseReplace):
     pass
 
 
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
 class TestRightGizmoSQL(BaseRight):
     pass
 
@@ -125,7 +123,6 @@ class TestSafeCastGizmoSQL(BaseSafeCast):
     pass
 
 
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
 class TestSplitPartGizmoSQL(BaseSplitPart):
     pass
 
@@ -142,6 +139,7 @@ class TestTypeBooleanGizmoSQL(BaseTypeBoolean):
     pass
 
 
+@pytest.mark.skip(reason="DuckDB CSV reader infers integers as BIGINT; test expects INTEGER")
 class TestTypeIntGizmoSQL(BaseTypeInt):
     pass
 

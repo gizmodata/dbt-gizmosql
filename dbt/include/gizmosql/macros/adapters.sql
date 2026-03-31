@@ -292,6 +292,44 @@ def materialize(df, con):
   {{ return('?') }}
 {% endmacro %}
 
+{#-- Seed loading: use DuckDB client-side for CSV parsing, then ADBC bulk ingest --#}
+{% macro gizmosql__create_csv_table(model, agate_table) %}
+  {#-- No-op: table will be created by ADBC ingest in load_csv_rows.
+       Run a trivial statement to ensure a connection is open. --#}
+  {%- call statement('create_csv_table') -%}
+    select 1
+  {%- endcall -%}
+  {{ return("") }}
+{% endmacro %}
+
+{% macro gizmosql__reset_csv_table(model, full_refresh, old_relation, agate_table) %}
+  {#-- Always drop so ADBC ingest can recreate with correct types --#}
+  {{ adapter.drop_relation(old_relation) }}
+  {%- call statement('reset_csv_table') -%}
+    select 1
+  {%- endcall -%}
+  {{ return("") }}
+{% endmacro %}
+
+{% macro gizmosql__load_csv_rows(model, agate_table) %}
+  {#-- Build the CSV file path (mirrors dbt's load_agate_table logic) --#}
+  {% set csv_path = model['root_path'] ~ '/' ~ model['original_file_path'] %}
+  {% set column_types = model['config'].get('column_types', {}) %}
+  {% set delimiter = model['config'].get('delimiter', none) %}
+
+  {#-- Use DuckDB (client-side) to read CSV with proper type inference,
+       then ADBC bulk ingest to GizmoSQL server --#}
+  {% do adapter.load_seed_from_csv(
+    this.identifier,
+    csv_path,
+    this.schema,
+    column_types,
+    delimiter
+  ) %}
+
+  {{ return("-- seed loaded via DuckDB CSV reader + ADBC bulk ingest") }}
+{% endmacro %}
+
 {% macro gizmosql__get_merge_sql(target, source, unique_key, dest_columns, incremental_predicates=none) -%}
     {%- set predicates = [] if incremental_predicates is none else [] + incremental_predicates -%}
     {%- set merge_update_columns = config.get('merge_update_columns') -%}

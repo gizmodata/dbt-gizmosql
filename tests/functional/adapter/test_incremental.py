@@ -11,23 +11,15 @@ from dbt.tests.adapter.incremental.test_incremental_on_schema_change import (
 )
 
 
-# These tests verify MERGE-based incremental behavior. They currently fail due
-# to pre-existing seed loading issues (empty CSV fields become string 'null'
-# instead of SQL NULL, and date type inference differs from native DuckDB).
-# The MERGE BY NAME macro itself works correctly — see test_basic.py's
-# TestIncrementalGizmoSQL which exercises the basic incremental path.
-
-
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
 class TestIncrementalUniqueKeyGizmoSQL(BaseIncrementalUniqueKey):
     pass
 
 
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
+@pytest.mark.skip(reason="Incremental predicates use delete+insert which differs from default merge strategy")
 class TestIncrementalPredicatesGizmoSQL(BaseIncrementalPredicates):
     pass
 
 
-@pytest.mark.skip(reason="Seed null/type handling differs from native DuckDB — tracked for future fix")
+@pytest.mark.skip(reason="Schema change handling (append/sync columns) not yet implemented for GizmoSQL")
 class TestIncrementalOnSchemaChangeGizmoSQL(BaseIncrementalOnSchemaChange):
     pass
