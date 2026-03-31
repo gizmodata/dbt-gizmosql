@@ -20,6 +20,11 @@ from dbt.tests.adapter.basic.test_docs_generate import (
     BaseDocsGenerate,
     BaseDocsGenReferences,
 )
+from dbt.tests.adapter.basic.expected_catalog import (
+    base_expected_catalog,
+    no_stats,
+    expected_references_catalog,
+)
 
 
 class TestSimpleMaterializationsGizmoSQL(BaseSimpleMaterializations):
@@ -70,11 +75,32 @@ class TestValidateConnectionGizmoSQL(BaseValidateConnection):
     pass
 
 
-@pytest.mark.skip(reason="Catalog query needs adapter-specific 'table_owner' column — tracked for future fix")
 class TestDocsGenerateGizmoSQL(BaseDocsGenerate):
-    pass
+    @pytest.fixture(scope="class")
+    def expected_catalog(self, project):
+        return base_expected_catalog(
+            project,
+            role=None,
+            id_type="BIGINT",
+            text_type="VARCHAR",
+            time_type="TIMESTAMP",
+            view_type="VIEW",
+            table_type="BASE TABLE",
+            model_stats=no_stats(),
+        )
 
 
-@pytest.mark.skip(reason="Catalog query needs adapter-specific 'table_owner' column — tracked for future fix")
 class TestDocsGenReferencesGizmoSQL(BaseDocsGenReferences):
-    pass
+    @pytest.fixture(scope="class")
+    def expected_catalog(self, project):
+        return expected_references_catalog(
+            project,
+            role=None,
+            id_type="BIGINT",
+            text_type="VARCHAR",
+            time_type="TIMESTAMP",
+            view_type="VIEW",
+            table_type="BASE TABLE",
+            model_stats=no_stats(),
+            bigint_type="BIGINT",
+        )

@@ -85,7 +85,6 @@ class TestIntersectGizmoSQL(BaseIntersect):
     pass
 
 
-@pytest.mark.skip(reason="DuckDB uses date_add not dateadd — needs utility macro override")
 class TestLastDayGizmoSQL(BaseLastDay):
     pass
 
@@ -94,7 +93,6 @@ class TestLengthGizmoSQL(BaseLength):
     pass
 
 
-@pytest.mark.skip(reason="DuckDB listagg syntax differs — needs utility macro override")
 class TestListaggGizmoSQL(BaseListagg):
     pass
 

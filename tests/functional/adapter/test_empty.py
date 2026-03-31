@@ -10,6 +10,6 @@ class TestEmptyGizmoSQL(BaseTestEmpty):
     pass
 
 
-@pytest.mark.skip(reason="dbt-core generates invalid SQL with double alias for DuckDB syntax")
+@pytest.mark.skip(reason="dbt-core generates double-alias SQL incompatible with DuckDB parser")
 class TestEmptyInlineSourceRefGizmoSQL(BaseTestEmptyInlineSourceRef):
     pass
