@@ -16,7 +16,6 @@ from dbt.tests.adapter.simple_snapshot.new_record_timestamp_mode import (
 from dbt.tests.adapter.simple_snapshot.test_various_configs import (
     BaseSnapshotColumnNames,
     BaseSnapshotColumnNamesFromDbtProject,
-    BaseSnapshotMultiUniqueKey,
 )
 
 
@@ -52,5 +51,3 @@ class TestSnapshotColumnNamesFromDbtProjectGizmoSQL(
     pass
 
 
-class TestSnapshotMultiUniqueKeyGizmoSQL(BaseSnapshotMultiUniqueKey):
-    pass
