@@ -7,11 +7,19 @@ from dbt.tests.adapter.basic.test_singular_tests_ephemeral import (
 )
 from dbt.tests.adapter.basic.test_empty import BaseEmpty
 from dbt.tests.adapter.basic.test_ephemeral import BaseEphemeral
-from dbt.tests.adapter.basic.test_incremental import BaseIncremental
+from dbt.tests.adapter.basic.test_incremental import (
+    BaseIncremental,
+    BaseIncrementalNotSchemaChange,
+)
 from dbt.tests.adapter.basic.test_generic_tests import BaseGenericTests
 from dbt.tests.adapter.basic.test_snapshot_check_cols import BaseSnapshotCheckCols
 from dbt.tests.adapter.basic.test_snapshot_timestamp import BaseSnapshotTimestamp
 from dbt.tests.adapter.basic.test_adapter_methods import BaseAdapterMethod
+from dbt.tests.adapter.basic.test_validate_connection import BaseValidateConnection
+from dbt.tests.adapter.basic.test_docs_generate import (
+    BaseDocsGenerate,
+    BaseDocsGenReferences,
+)
 
 
 class TestSimpleMaterializationsGizmoSQL(BaseSimpleMaterializations):
@@ -38,6 +46,10 @@ class TestIncrementalGizmoSQL(BaseIncremental):
     pass
 
 
+class TestIncrementalNotSchemaChangeGizmoSQL(BaseIncrementalNotSchemaChange):
+    pass
+
+
 class TestGenericTestsGizmoSQL(BaseGenericTests):
     pass
 
@@ -51,4 +63,18 @@ class TestSnapshotTimestampGizmoSQL(BaseSnapshotTimestamp):
 
 
 class TestBaseAdapterMethodGizmoSQL(BaseAdapterMethod):
+    pass
+
+
+class TestValidateConnectionGizmoSQL(BaseValidateConnection):
+    pass
+
+
+@pytest.mark.skip(reason="Catalog query needs adapter-specific 'table_owner' column — tracked for future fix")
+class TestDocsGenerateGizmoSQL(BaseDocsGenerate):
+    pass
+
+
+@pytest.mark.skip(reason="Catalog query needs adapter-specific 'table_owner' column — tracked for future fix")
+class TestDocsGenReferencesGizmoSQL(BaseDocsGenReferences):
     pass

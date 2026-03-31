@@ -199,7 +199,11 @@ def materialize(df, con):
 {%- endmacro %}
 
 {% macro gizmosql__get_incremental_default_sql(arg_dict) %}
-  {% do return(get_incremental_delete_insert_sql(arg_dict)) %}
+  {% if arg_dict["unique_key"] %}
+    {% do return(get_incremental_merge_sql(arg_dict)) %}
+  {% else %}
+    {% do return(get_incremental_append_sql(arg_dict)) %}
+  {% endif %}
 {% endmacro %}
 
 {% macro location_exists(location) -%}
@@ -290,33 +294,17 @@ def materialize(df, con):
 
 {% macro gizmosql__get_merge_sql(target, source, unique_key, dest_columns, incremental_predicates=none) -%}
     {%- set predicates = [] if incremental_predicates is none else [] + incremental_predicates -%}
-    {%- set dest_cols_csv = get_quoted_csv(dest_columns | map(attribute="name")) -%}
-
-    {%- set source_aliased_insert_cols = [] -%}
-    {%- for col in source_columns -%}
-        {%- do source_aliased_insert_cols.append("DBT_INTERNAL_SOURCE." ~ col) -%}
-    {%- endfor -%}
-
-    {%- set source_aliased_insert_cols_csv = source_aliased_insert_cols | join(', ') -%}
-
     {%- set merge_update_columns = config.get('merge_update_columns') -%}
     {%- set merge_exclude_columns = config.get('merge_exclude_columns') -%}
-    {%- set update_columns = get_merge_update_columns(merge_update_columns, merge_exclude_columns, dest_columns) -%}
     {%- set sql_header = config.get('sql_header', none) -%}
 
     {% if unique_key %}
         {% if unique_key is sequence and unique_key is not mapping and unique_key is not string %}
             {% for key in unique_key %}
-                {% set this_key_match %}
-                    DBT_INTERNAL_SOURCE.{{ key }} = DBT_INTERNAL_DEST.{{ key }}
-                {% endset %}
-                {% do predicates.append(this_key_match) %}
+                {% do predicates.append("DBT_INTERNAL_SOURCE." ~ key ~ " = DBT_INTERNAL_DEST." ~ key) %}
             {% endfor %}
         {% else %}
-            {% set source_unique_key = ("DBT_INTERNAL_SOURCE." ~ unique_key) | trim %}
-	    {% set target_unique_key = ("DBT_INTERNAL_DEST." ~ unique_key) | trim %}
-	    {% set unique_key_match = equals(source_unique_key, target_unique_key) | trim %}
-            {% do predicates.append(unique_key_match) %}
+            {% do predicates.append("DBT_INTERNAL_SOURCE." ~ unique_key ~ " = DBT_INTERNAL_DEST." ~ unique_key) %}
         {% endif %}
     {% else %}
         {% do predicates.append('FALSE') %}
@@ -329,51 +317,44 @@ def materialize(df, con):
         on {{"(" ~ predicates | join(") and (") ~ ")"}}
 
     {% if unique_key %}
-    when matched then update set
-        {% for column_name in update_columns -%}
-            {{ column_name }} = DBT_INTERNAL_SOURCE.{{ column_name }}
-            {%- if not loop.last %}, {%- endif %}
-        {%- endfor %}
+    when matched then
+        {%- if merge_update_columns or merge_exclude_columns %}
+        {%- set update_columns = get_merge_update_columns(merge_update_columns, merge_exclude_columns, dest_columns) %}
+        update set
+            {% for column_name in update_columns -%}
+                {{ column_name }} = DBT_INTERNAL_SOURCE.{{ column_name }}
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
+        {%- else %}
+        update by name
+        {%- endif %}
     {% endif %}
 
-    when not matched then insert
-        ({{ dest_cols_csv }})
-    values
-        ({{ source_aliased_insert_cols_csv }})
+    when not matched then insert by name
 
 {% endmacro %}
 
 {% macro gizmosql__snapshot_merge_sql(target, source, insert_cols) -%}
     {%- set insert_cols_csv = insert_cols | join(', ') -%}
-    {%- set source_aliased_insert_cols = [] -%}
-    {%- for col in insert_cols -%}
-        {%- do source_aliased_insert_cols.append("DBT_INTERNAL_SOURCE." ~ col) -%}
-    {%- endfor -%}
-
-    {%- set source_aliased_insert_cols_csv = source_aliased_insert_cols | join(', ') -%}
 
     {%- set columns = config.get("snapshot_table_column_names") or get_snapshot_table_column_names() -%}
 
-    merge into {{ target.render() }} as DBT_INTERNAL_DEST
-    using {{ source }} as DBT_INTERNAL_SOURCE
-    on DBT_INTERNAL_SOURCE.{{ columns.dbt_scd_id }} = DBT_INTERNAL_DEST.{{ columns.dbt_scd_id }}
+    update {{ target }} as DBT_INTERNAL_TARGET
+    set {{ columns.dbt_valid_to }} = DBT_INTERNAL_SOURCE.{{ columns.dbt_valid_to }}
+    from {{ source }} as DBT_INTERNAL_SOURCE
+    where DBT_INTERNAL_SOURCE.{{ columns.dbt_scd_id }}::text = DBT_INTERNAL_TARGET.{{ columns.dbt_scd_id }}::text
+      and DBT_INTERNAL_SOURCE.dbt_change_type::text in ('update'::text, 'delete'::text)
+      {% if config.get("dbt_valid_to_current") %}
+        and (DBT_INTERNAL_TARGET.{{ columns.dbt_valid_to }} = {{ config.get('dbt_valid_to_current') }} or DBT_INTERNAL_TARGET.{{ columns.dbt_valid_to }} is null);
+      {% else %}
+        and DBT_INTERNAL_TARGET.{{ columns.dbt_valid_to }} is null;
+      {% endif %}
 
-    when matched
-     {% if config.get("dbt_valid_to_current") %}
-	{% set source_unique_key = ("DBT_INTERNAL_DEST." ~ columns.dbt_valid_to) | trim %}
-	{% set target_unique_key = config.get('dbt_valid_to_current') | trim %}
-	and ({{ equals(source_unique_key, target_unique_key) }} or {{ source_unique_key }} is null)
-
-     {% else %}
-       and DBT_INTERNAL_DEST.{{ columns.dbt_valid_to }} is null
-     {% endif %}
-     and DBT_INTERNAL_SOURCE.dbt_change_type in ('update', 'delete')
-        then update
-        set {{ columns.dbt_valid_to }} = DBT_INTERNAL_SOURCE.{{ columns.dbt_valid_to }}
-
-    when not matched
-     and DBT_INTERNAL_SOURCE.dbt_change_type = 'insert'
-        then insert ({{ insert_cols_csv }})
-        values ({{ source_aliased_insert_cols_csv }})
+    insert into {{ target }} ({{ insert_cols_csv }})
+    select {% for column in insert_cols -%}
+        DBT_INTERNAL_SOURCE.{{ column }} {%- if not loop.last %}, {%- endif %}
+    {%- endfor %}
+    from {{ source }} as DBT_INTERNAL_SOURCE
+    where DBT_INTERNAL_SOURCE.dbt_change_type::text = 'insert'::text;
 
 {% endmacro %}

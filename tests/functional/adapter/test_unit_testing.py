@@ -6,6 +6,7 @@ from dbt.tests.adapter.unit_testing.test_case_insensitivity import (
 from dbt.tests.adapter.unit_testing.test_invalid_input import (
     BaseUnitTestInvalidInput,
 )
+from dbt.tests.adapter.unit_testing.test_types import BaseUnitTestingTypes
 
 
 class TestUnitTestCaseInsensitivityGizmoSQL(BaseUnitTestCaseInsensivity):
@@ -13,4 +14,8 @@ class TestUnitTestCaseInsensitivityGizmoSQL(BaseUnitTestCaseInsensivity):
 
 
 class TestUnitTestInvalidInputGizmoSQL(BaseUnitTestInvalidInput):
+    pass
+
+
+class TestUnitTestingTypesGizmoSQL(BaseUnitTestingTypes):
     pass
