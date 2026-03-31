@@ -141,12 +141,18 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             raise dbt.adapters.exceptions.FailedToConnectError(str(e))
 
     def add_begin_query(self):
-        return self.add_query("BEGIN", auto_begin=False)
+        """No-op: rely on autocommit so each statement commits immediately.
+
+        Flight SQL's PREPARE phase validates against committed catalog state,
+        so uncommitted DDL from earlier in the same transaction is invisible
+        to subsequent statements. By skipping BEGIN (with autocommit=True on
+        the connection), each statement auto-commits and is immediately visible.
+        """
+        pass
 
     def add_commit_query(self):
-        connection, cursor = self.add_query("COMMIT", auto_begin=False)
-        cursor.close()
-        return connection, cursor
+        """No-op: paired with add_begin_query — see docstring there."""
+        pass
 
     def execute(
         self,
