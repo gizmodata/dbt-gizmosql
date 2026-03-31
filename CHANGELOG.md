@@ -1,5 +1,14 @@
 # dbt-gizmosql changelog
 
+## v1.11.11 (2026-03-31)
+
+### Changes
+- Removed adapter-side `adbc_get_info()` thread-safety workaround — now handled
+  upstream in `adbc-driver-gizmosql` >= 1.1.5.
+
+### Dependency updates
+- `adbc-driver-gizmosql`: >=1.1.4 -> >=1.1.5
+
 ## v1.11.10 (2026-03-31)
 
 ### Bug fixes
