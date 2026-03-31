@@ -1,4 +1,5 @@
 import re
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -93,6 +94,13 @@ _RETRY_BACKOFF_SECONDS = 1.0
 class GizmoSQLConnectionManager(SQLConnectionManager):
     TYPE = "gizmosql"
 
+    # Lock and cache for the vendor version check. adbc_get_info() triggers a
+    # Go driver code path (DriverInfo.RegisterInfoCode) that writes to an
+    # unprotected map — calling it from multiple threads crashes the process
+    # with "fatal error: concurrent map writes".  We call it exactly once.
+    _vendor_check_lock = threading.Lock()
+    _vendor_version_verified = False
+
     @classmethod
     def open(cls, connection: Connection) -> Connection:
         if connection.state == ConnectionState.OPEN:
@@ -120,10 +128,17 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             connection.handle = gizmosql.connect(**connect_kwargs)
             connection.state = ConnectionState.OPEN
 
-            vendor_version = connection.handle.adbc_get_info().get("vendor_version")
-
-            if not re.search(pattern="^duckdb ", string=vendor_version):
-                raise RuntimeError(f"Unsupported GizmoSQL server backend: '{vendor_version}'")
+            # Verify vendor version exactly once. adbc_get_info() is not
+            # thread-safe in the Go ADBC driver (apache/arrow-adbc) — concurrent
+            # calls cause a fatal "concurrent map writes" panic. Since the server
+            # backend won't change between connections, checking once is sufficient.
+            if not cls._vendor_version_verified:
+                with cls._vendor_check_lock:
+                    if not cls._vendor_version_verified:
+                        vendor_version = connection.handle.adbc_get_info().get("vendor_version")
+                        if not re.search(pattern="^duckdb ", string=vendor_version):
+                            raise RuntimeError(f"Unsupported GizmoSQL server backend: '{vendor_version}'")
+                        cls._vendor_version_verified = True
 
             return connection
 
