@@ -1,5 +1,5 @@
 # dbt-gizmosql
-An [dbt](https://www.getdbt.com/product/what-is-dbt) adapter for [GizmoSQL](https://gizmodata.com/gizmosql)
+A [dbt](https://www.getdbt.com/product/what-is-dbt) adapter for [GizmoSQL](https://gizmodata.com/gizmosql)
 
 [<img src="https://img.shields.io/badge/GitHub-gizmodata%2Fdbt--gizmosql-blue.svg?logo=Github">](https://github.com/gizmodata/dbt-gizmosql)
 [<img src="https://img.shields.io/badge/GitHub-gizmodata%2Fgizmosql--public-blue.svg?logo=Github">](https://github.com/gizmodata/gizmosql-public)
@@ -15,11 +15,58 @@ dbt is the T in ELT. Organize, cleanse, denormalize, filter, rename, and pre-agg
 ## GizmoSQL
 GizmoSQL is an Apache Arrow Flight-based SQL engine for data warehouses. It is designed to be fast, scalable, and easy to use.
 
-It has DuckDB and SQLite back-ends.  You can see more information about GizmoSQL [here](https://gizmodata.com/gizmosql).
+It has DuckDB and SQLite back-ends. You can see more information about GizmoSQL [here](https://gizmodata.com/gizmosql).
 
-### Installation
+## Features
 
-#### Option 1 - from PyPi
+This adapter provides feature parity with [dbt-duckdb](https://github.com/duckdb/dbt-duckdb) for all features applicable to a remote Flight SQL connection:
+
+### Materializations
+- **Table** and **View** (SQL and Python)
+- **Incremental** with four strategies:
+  - `append` -- simple record additions
+  - `delete+insert` -- key-based upserts with DuckDB's `DELETE...USING` syntax
+  - `merge` -- uses DuckDB's `MERGE` with `UPDATE BY NAME` / `INSERT BY NAME`
+  - `microbatch` -- time-based batch processing via `event_time` windows
+- **Snapshot** (check and timestamp modes) using UPDATE+INSERT pattern
+- **Schema change handling**: `ignore`, `append_new_columns`, `sync_all_columns`, `fail`
+
+### Python Models
+Python models execute client-side using a local DuckDB instance for full API compatibility, then ship results to GizmoSQL via ADBC bulk ingest:
+
+```python
+def model(dbt, session):
+    dbt.config(materialized="table")
+    df = dbt.ref("upstream_model")
+    df = df.filter(df.amount > 100)
+    return df
+```
+
+- Supports DuckDB relations, pandas DataFrames, and PyArrow Tables as return types
+- `dbt.ref()` and `dbt.source()` fetch data from GizmoSQL as Arrow and expose it as DuckDB relations
+- Incremental Python models supported (with proper `dbt.is_incremental` handling)
+
+### Seed Loading
+Seeds are loaded using DuckDB's CSV reader on the client side with ADBC bulk ingest to the server:
+
+- Correct null handling (empty CSV fields become SQL `NULL`, not the string `'null'`)
+- Proper type inference (dates detected as `DATE`, integers as `BIGINT`, etc.)
+- Supports `column_types` overrides and custom delimiters
+- Significantly faster than dbt's default batch `INSERT` path
+
+### Constraints
+All constraint types are enforced: `CHECK`, `NOT NULL`, `UNIQUE`, `PRIMARY KEY`, `FOREIGN KEY`.
+
+### Documentation
+- `persist_docs` support (`COMMENT ON` for relations and columns)
+- Full catalog generation with `dbt docs generate`
+
+### Utility Macros
+DuckDB-compatible overrides for: `dateadd`, `last_day`, `listagg`, `split_part`.
+
+## Installation
+
+### Option 1 - from PyPi
 ```shell
 # Create the virtual environment
 python3 -m venv .venv
@@ -32,7 +79,7 @@ pip install --upgrade pip
 python -m pip install dbt-core dbt-gizmosql
 ```
 
-#### Option 2 - from source - for development of the adapter
+### Option 2 - from source (for development)
 ```shell
 git clone https://github.com/gizmodata/dbt-gizmosql
 
@@ -51,18 +98,12 @@ pip install --upgrade pip setuptools wheel
 pip install --editable .[dev]
 ```
 
-### Usage of the dbt GizmoSQL adapter
+## Configuration
 
-#### Option 1: dbt init
-You can setup the adapter by running `dbt init` - and choosing values that the wizard prompts you for.   
+### Profile setup
 
-Then you can run by going into the directory for the project you just created:
-```bash
-dbt run
-```
+Add the following to your `~/.dbt/profiles.yml` (change values to match your environment):
 
-#### Option 2: Setup dbt.profiles.yml
-Add something like the following to your `~/.dbt.profiles.yml` file (change the values to match your environment):
 ```yaml
 my-gizmosql-db:
   target: dev
@@ -71,6 +112,7 @@ my-gizmosql-db:
       type: gizmosql
       host: localhost
       port: 31337
+      database: dbt
       user: [username]
       password: [password]
       use_encryption: True
@@ -78,8 +120,8 @@ my-gizmosql-db:
       threads: 2
 ```
 
-#### Option 3: OAuth/SSO Authentication
-For browser-based OAuth/SSO, use `auth_type: external` — no username or password needed:
+### OAuth/SSO Authentication
+For browser-based OAuth/SSO, use `auth_type: external` -- no username or password needed:
 ```yaml
 my-gizmosql-db:
   target: dev
@@ -90,26 +132,25 @@ my-gizmosql-db:
       port: 31337
       auth_type: external
       use_encryption: True
-      tls_skip_verify: True
       threads: 2
 ```
 
-** Note **
-### Adapter Scaffold default Versioning
-This adapter plugin follows [semantic versioning](https://semver.org/). The version of this plugin is v1.11.x, in order to be compatible with dbt Core v1.11.x.
+## Architecture
 
-It's also brand new! For GizmoSQL-specific functionality, we will aim for backwards-compatibility wherever possible. We are likely to be iterating more quickly than most major-version-1 software projects. To that end, backwards-incompatible changes will be clearly communicated and limited to minor versions (once every three months).
+This adapter connects to GizmoSQL via Apache Arrow Flight SQL using the [ADBC](https://arrow.apache.org/adbc/) driver (`adbc-driver-gizmosql`). Key architectural decisions:
 
-## Join the dbt Community
+- **Autocommit mode**: Each statement auto-commits immediately. Flight SQL's `PREPARE` phase validates against committed catalog state, so explicit transactions would cause DDL from earlier statements to be invisible to later ones.
+- **Client-side DuckDB**: Seeds and Python models use a local DuckDB instance for processing, with results shipped to the server via ADBC bulk ingest (Arrow columnar format over gRPC).
+- **MERGE BY NAME**: Incremental merges use DuckDB's `UPDATE BY NAME` / `INSERT BY NAME` syntax, which is resilient to column ordering differences.
 
-- Be part of the conversation in the [dbt Community Slack](http://community.getdbt.com/)
-- If one doesn't exist feel free to request a #db-GizmoSQL channel be made in the [#channel-requests](https://getdbt.slack.com/archives/C01D8J8AJDA) on dbt community slack channel.
-- Read more on the [dbt Community Discourse](https://discourse.getdbt.com)
+## Versioning
+
+This adapter follows [semantic versioning](https://semver.org/). The major.minor version tracks dbt-core (e.g., dbt-core 1.11.x -> dbt-gizmosql 1.11.x).
 
 ## Reporting bugs and contributing code
 
-- Want to report a bug or request a feature? Let us know on [Slack](http://community.getdbt.com/), or open [an issue](https://github.com/dbt-labs/dbt-redshift/issues/new)
-- Want to help us build dbt? Check out the [Contributing Guide](https://github.com/dbt-labs/dbt/blob/HEAD/CONTRIBUTING.md)
+- Want to report a bug or request a feature? Open [an issue](https://github.com/gizmodata/dbt-gizmosql/issues)
+- Want to contribute? Pull requests are welcome
 
 ## Code of Conduct
 
