@@ -1,4 +1,7 @@
+import importlib.util
 import os
+import tempfile
+import traceback
 from typing import Dict, List, Optional
 
 import duckdb
@@ -6,8 +9,10 @@ import pyarrow as pa
 
 from dbt.adapters.base.impl import ConstraintSupport
 from dbt.adapters.base.meta import available
+from dbt.adapters.contracts.connection import AdapterResponse
 from dbt.adapters.sql import SQLAdapter as adapter_cls
 from dbt_common.contracts.constraints import ConstraintType
+from dbt_common.exceptions import DbtRuntimeError
 
 from dbt.adapters.gizmosql import GizmoSQLConnectionManager
 from dbt.adapters.gizmosql.column import DuckDBColumn
@@ -166,6 +171,79 @@ class GizmoSQLAdapter(adapter_cls):
         if pa.types.is_timestamp(arrow_type):
             return "TIMESTAMP"
         return "VARCHAR"
+
+    def submit_python_job(self, parsed_model: dict, compiled_code: str) -> AdapterResponse:
+        """Execute a Python model client-side using local DuckDB.
+
+        Flow:
+        1. Fetch ref/source data from GizmoSQL as Arrow tables
+        2. Register them in a local DuckDB instance
+        3. Run the Python model against local DuckDB
+        4. Ship the result back to GizmoSQL via ADBC ingest
+        """
+        connection = self.connections.get_thread_connection()
+        adbc_conn = connection.handle
+
+        # Create a local DuckDB for model execution
+        local_db = duckdb.connect(":memory:")
+
+        # The load_df_function fetches data from GizmoSQL and registers locally
+        def load_df_function(table_name):
+            cursor = adbc_conn.cursor()
+            try:
+                cursor.execute(f"SELECT * FROM {table_name}")
+                arrow_table = cursor.fetch_arrow_table()
+            finally:
+                cursor.close()
+            # Register in local DuckDB so the model can query it
+            local_db.register(table_name.replace('"', ''), arrow_table)
+            return local_db.query(f"SELECT * FROM '{table_name.replace(chr(34), '')}'")
+
+        # Write compiled code to a temp file and load as module
+        mod_file = tempfile.NamedTemporaryFile(suffix=".py", delete=False)
+        try:
+            mod_file.write(compiled_code.lstrip().encode("utf-8"))
+            mod_file.close()
+
+            identifier = parsed_model["alias"]
+            spec = importlib.util.spec_from_file_location(identifier, mod_file.name)
+            if not spec or not spec.loader:
+                raise DbtRuntimeError(f"Failed to load python model: {identifier}")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            # Run the model
+            dbt_obj = module.dbtObj(load_df_function)
+            df = module.model(dbt_obj, local_db)
+
+            # Materialize: convert result to Arrow and ship to GizmoSQL
+            if isinstance(df, duckdb.DuckDBPyRelation):
+                arrow_table = df.to_arrow_table()
+            elif isinstance(df, pa.Table):
+                arrow_table = df
+            elif hasattr(df, "to_arrow"):
+                # pandas DataFrame
+                arrow_table = pa.Table.from_pandas(df)
+            else:
+                raise DbtRuntimeError(
+                    f"Python model must return a DuckDB relation, Arrow table, "
+                    f"or pandas DataFrame, got {type(df)}"
+                )
+
+            # Call materialize from compiled code (handles CREATE TABLE)
+            module.materialize(arrow_table, adbc_conn)
+
+        except DbtRuntimeError:
+            raise
+        except Exception as err:
+            raise DbtRuntimeError(
+                f"Python model failed:\n{''.join(traceback.format_exception(err))}"
+            )
+        finally:
+            os.unlink(mod_file.name)
+            local_db.close()
+
+        return AdapterResponse(_message="OK")
 
     @available.parse(lambda *a, **k: [])
     def get_column_schema_from_query(self, sql: str) -> List[DuckDBColumn]:

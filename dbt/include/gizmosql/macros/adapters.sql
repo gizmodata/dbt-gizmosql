@@ -92,19 +92,29 @@
 {{ compiled_code }}
 
 def materialize(df, con):
+    """Ship Arrow data to GizmoSQL via ADBC bulk ingest."""
+    import pyarrow as pa
+
+    # Convert to Arrow table if needed
+    if isinstance(df, pa.Table):
+        arrow_table = df
+    elif hasattr(df, 'to_arrow'):
+        arrow_table = pa.Table.from_pandas(df)
+    else:
+        raise ValueError(f"Cannot materialize type {type(df)} - expected Arrow Table or pandas DataFrame")
+
+    # Drop existing table and ingest via ADBC
+    cursor = con.cursor()
     try:
-        import pyarrow
-        pyarrow_available = True
-    except ImportError:
-        pyarrow_available = False
+        cursor.execute('DROP TABLE IF EXISTS {{ relation }}')
+        cursor.adbc_ingest(
+            '{{ relation.identifier }}',
+            arrow_table,
+            mode='create',
+            db_schema_name='{{ relation.schema }}',
+        )
     finally:
-        if pyarrow_available and isinstance(df, pyarrow.Table):
-            # https://github.com/duckdb/duckdb/issues/6584
-            import pyarrow.dataset
-    tmp_name = '__dbt_python_model_df_' + '{{ relation.identifier }}'
-    con.register(tmp_name, df)
-    con.execute('create table {{ relation }} as select * from ' + tmp_name)
-    con.unregister(tmp_name)
+        cursor.close()
 {% endmacro %}
 
 {% macro gizmosql__create_view_as(relation, sql) -%}
