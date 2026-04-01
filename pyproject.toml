@@ -20,7 +20,8 @@ dependencies = [
   "dbt-common~=1.37.3",
   "dbt-adapters~=1.22.9",
   "adbc-driver-gizmosql>=1.1.5",
-  "duckdb>=1.0.0"
+  "duckdb>=1.0.0",
+  "pandas>=2.0.0"
 ]
 [project.optional-dependencies]
 dev = [

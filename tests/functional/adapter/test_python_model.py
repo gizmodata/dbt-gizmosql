@@ -10,6 +10,5 @@ class TestPythonModelGizmoSQL(BasePythonModelTests):
     pass
 
 
-@pytest.mark.skip(reason="Incremental Python model test uses pandas-style df.filter(df.id > 5) which requires pandas/numpy")
 class TestPythonIncrementalGizmoSQL(BasePythonIncrementalTests):
     pass

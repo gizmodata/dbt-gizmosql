@@ -19,6 +19,60 @@ from dbt.adapters.gizmosql.column import DuckDBColumn
 from dbt.adapters.gizmosql.relation import GizmoSQLRelation
 
 
+class _DuckDBDataFrame:
+    """Wrapper around a DuckDB relation that also supports pandas-style operations.
+
+    DuckDB relations support .limit(), .filter('sql'), .project(), etc.
+    This wrapper adds pandas-style column access (df.col > 5) and
+    .filter(boolean_series) by converting to pandas when needed.
+    """
+
+    def __init__(self, relation):
+        self._rel = relation
+        self._pdf = None
+
+    def _to_pandas(self):
+        if self._pdf is None:
+            self._pdf = self._rel.df()
+        return self._pdf
+
+    # DuckDB relation methods
+    def limit(self, n):
+        return _DuckDBDataFrame(self._rel.limit(n))
+
+    def project(self, *args):
+        return _DuckDBDataFrame(self._rel.project(*args))
+
+    def order(self, *args):
+        return _DuckDBDataFrame(self._rel.order(*args))
+
+    def fetchall(self):
+        return self._rel.fetchall()
+
+    def to_arrow_table(self):
+        return self._rel.to_arrow_table()
+
+    def df(self):
+        return self._to_pandas()
+
+    # Pandas-style column access for filter expressions (df.id > 5)
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self._to_pandas()[name]
+
+    # Pandas-style .filter() with boolean Series
+    def filter(self, expr):
+        if isinstance(expr, str):
+            return _DuckDBDataFrame(self._rel.filter(expr))
+        # pandas boolean Series
+        pdf = self._to_pandas()
+        return pdf[expr]
+
+    def __repr__(self):
+        return repr(self._rel)
+
+
 class GizmoSQLAdapter(adapter_cls):
     """
     Controls actual implementation of adapter, and ability to override certain methods.
@@ -187,7 +241,9 @@ class GizmoSQLAdapter(adapter_cls):
         # Create a local DuckDB for model execution
         local_db = duckdb.connect(":memory:")
 
-        # The load_df_function fetches data from GizmoSQL and registers locally
+        # The load_df_function fetches data from GizmoSQL and returns a
+        # DuckDB relation via local DuckDB for full API compatibility
+        # (supports .limit(), .filter(), .df(), etc.)
         def load_df_function(table_name):
             cursor = adbc_conn.cursor()
             try:
@@ -195,9 +251,9 @@ class GizmoSQLAdapter(adapter_cls):
                 arrow_table = cursor.fetch_arrow_table()
             finally:
                 cursor.close()
-            # Register in local DuckDB so the model can query it
-            local_db.register(table_name.replace('"', ''), arrow_table)
-            return local_db.query(f"SELECT * FROM '{table_name.replace(chr(34), '')}'")
+            clean_name = table_name.replace('"', '')
+            local_db.register(clean_name, arrow_table)
+            return _DuckDBDataFrame(local_db.query(f"SELECT * FROM '{clean_name}'"))
 
         # Write compiled code to a temp file and load as module
         mod_file = tempfile.NamedTemporaryFile(suffix=".py", delete=False)
@@ -217,18 +273,15 @@ class GizmoSQLAdapter(adapter_cls):
             df = module.model(dbt_obj, local_db)
 
             # Materialize: convert result to Arrow and ship to GizmoSQL
-            if isinstance(df, duckdb.DuckDBPyRelation):
+            if isinstance(df, _DuckDBDataFrame):
+                arrow_table = df.to_arrow_table()
+            elif isinstance(df, duckdb.DuckDBPyRelation):
                 arrow_table = df.to_arrow_table()
             elif isinstance(df, pa.Table):
                 arrow_table = df
-            elif hasattr(df, "to_arrow"):
-                # pandas DataFrame
-                arrow_table = pa.Table.from_pandas(df)
             else:
-                raise DbtRuntimeError(
-                    f"Python model must return a DuckDB relation, Arrow table, "
-                    f"or pandas DataFrame, got {type(df)}"
-                )
+                # pandas DataFrame or anything Arrow-convertible
+                arrow_table = pa.Table.from_pandas(df, preserve_index=False)
 
             # Call materialize from compiled code (handles CREATE TABLE)
             module.materialize(arrow_table, adbc_conn)

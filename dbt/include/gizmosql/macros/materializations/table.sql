@@ -66,20 +66,37 @@
     {{ return(result) }}
   {% endif %}
 
-  -- Python incremental: full refresh behavior (rebuild table)
+  -- Python incremental
   {%- set existing_relation = load_cached_relation(this) -%}
   {%- set target_relation = this.incorporate(type='table') %}
-
-  {{ drop_relation_if_exists(existing_relation) }}
+  {%- set full_refresh_mode = (should_full_refresh()) -%}
 
   {#-- Ensure connection is open for commit --#}
   {%- call statement('setup_connection') -%}
     select 1
   {%- endcall -%}
 
-  {% call statement('main', language='python', fetch_result=False) -%}
-    {{ py_write_table(temporary=False, relation=target_relation, compiled_code=compiled_code) }}
-  {%- endcall %}
+  {% if existing_relation is none or full_refresh_mode %}
+    {#-- First run or full refresh: drop and create --#}
+    {{ drop_relation_if_exists(existing_relation) }}
+    {% call statement('main', language='python', fetch_result=False) -%}
+      {{ py_write_table(temporary=False, relation=target_relation, compiled_code=compiled_code) }}
+    {%- endcall %}
+  {% else %}
+    {#-- Incremental run: create temp table, then merge/append into target --#}
+    {%- set tmp_relation = make_temp_relation(target_relation) -%}
+    {% call statement('main', language='python', fetch_result=False) -%}
+      {{ py_write_table(temporary=True, relation=tmp_relation, compiled_code=compiled_code) }}
+    {%- endcall %}
+
+    {#-- Append temp into target (incremental models handle filtering in Python) --#}
+    {%- call statement('incremental_insert') -%}
+      INSERT INTO {{ target_relation }} SELECT * FROM {{ tmp_relation }}
+    {%- endcall -%}
+    {%- call statement('cleanup_temp') -%}
+      DROP TABLE IF EXISTS {{ tmp_relation }}
+    {%- endcall -%}
+  {% endif %}
 
   {% do persist_docs(target_relation, model) %}
   {{ adapter.commit() }}

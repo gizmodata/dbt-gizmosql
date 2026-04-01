@@ -94,25 +94,40 @@
 def materialize(df, con):
     """Ship Arrow data to GizmoSQL via ADBC bulk ingest."""
     import pyarrow as pa
+    import pandas as _pd
 
     # Convert to Arrow table if needed
     if isinstance(df, pa.Table):
         arrow_table = df
-    elif hasattr(df, 'to_arrow'):
-        arrow_table = pa.Table.from_pandas(df)
+    elif isinstance(df, _pd.DataFrame):
+        arrow_table = pa.Table.from_pandas(df, preserve_index=False)
+    elif hasattr(df, 'to_arrow_table'):
+        arrow_table = df.to_arrow_table()
     else:
-        raise ValueError(f"Cannot materialize type {type(df)} - expected Arrow Table or pandas DataFrame")
+        raise ValueError(f"Cannot materialize type {type(df)}")
 
-    # Drop existing table and ingest via ADBC
+    # Drop existing table and create via ADBC ingest
+    _schema = '{{ relation.schema }}'
+    schema_name = None if _schema in ('None', '') else _schema
     cursor = con.cursor()
     try:
         cursor.execute('DROP TABLE IF EXISTS {{ relation }}')
-        cursor.adbc_ingest(
-            '{{ relation.identifier }}',
-            arrow_table,
-            mode='create',
-            db_schema_name='{{ relation.schema }}',
-        )
+        if arrow_table.num_rows == 0:
+            # ADBC ingest fails on empty tables; create from schema
+            col_defs = ', '.join(
+                f'"{f.name}" VARCHAR' for f in arrow_table.schema
+            )
+            if schema_name:
+                cursor.execute(f'CREATE TABLE "{schema_name}"."{{ relation.identifier }}" ({col_defs})')
+            else:
+                cursor.execute(f'CREATE TABLE "{{ relation.identifier }}" ({col_defs})')
+        else:
+            cursor.adbc_ingest(
+                '{{ relation.identifier }}',
+                arrow_table,
+                mode='create',
+                db_schema_name=schema_name,
+            )
     finally:
         cursor.close()
 {% endmacro %}
