@@ -7,6 +7,7 @@ pytest_plugins = ["dbt.tests.fixtures.project"]
 
 # Constants
 GIZMOSQL_PORT = 31337
+GIZMOSQL_DATABASE = "dbt.db"
 
 
 # Function to wait for a specific log message indicating the container is ready
@@ -50,7 +51,8 @@ def gizmosql_server():
         environment={"GIZMOSQL_USERNAME": "dbt",
                      "GIZMOSQL_PASSWORD": "dbt",
                      "TLS_ENABLED": "1",
-                     "PRINT_QUERIES": "1"
+                     "PRINT_QUERIES": "1",
+                     "DATABASE_FILENAME": GIZMOSQL_DATABASE,
                      },
         stdout=True,
         stderr=True
@@ -74,6 +76,7 @@ def dbt_profile_target(gizmosql_server):
         'port': GIZMOSQL_PORT,
         'username': "dbt",
         'password': "dbt",
+        'database': "dbt",
         'use_encryption': True,
         'tls_skip_verify': True
     }

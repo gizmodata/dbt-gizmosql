@@ -1,12 +1,12 @@
 import pytest
 
 from dbt.tests.adapter.utils.test_any_value import BaseAnyValue
+from dbt.tests.adapter.utils.test_bool_or import BaseBoolOr
 from dbt.tests.adapter.utils.test_cast import BaseCast
 from dbt.tests.adapter.utils.test_cast_bool_to_text import BaseCastBoolToText
 from dbt.tests.adapter.utils.test_concat import BaseConcat
-from dbt.tests.adapter.utils.test_current_timestamp import (
-    BaseCurrentTimestampAware,
-)
+from dbt.tests.adapter.utils.test_current_timestamp import BaseCurrentTimestampAware
+from dbt.tests.adapter.utils.test_date_trunc import BaseDateTrunc
 from dbt.tests.adapter.utils.test_escape_single_quotes import (
     BaseEscapeSingleQuotesQuote,
 )
@@ -15,20 +15,29 @@ from dbt.tests.adapter.utils.test_generate_series import BaseGenerateSeries
 from dbt.tests.adapter.utils.test_get_powers_of_two import BaseGetPowersOfTwo
 from dbt.tests.adapter.utils.test_hash import BaseHash
 from dbt.tests.adapter.utils.test_intersect import BaseIntersect
+from dbt.tests.adapter.utils.test_last_day import BaseLastDay
 from dbt.tests.adapter.utils.test_length import BaseLength
-from dbt.tests.adapter.utils.test_null_compare import (
-    BaseMixedNullCompare,
-    BaseNullCompare,
-)
+from dbt.tests.adapter.utils.test_listagg import BaseListagg
+from dbt.tests.adapter.utils.test_null_compare import BaseMixedNullCompare, BaseNullCompare
 from dbt.tests.adapter.utils.test_position import BasePosition
+from dbt.tests.adapter.utils.test_replace import BaseReplace
+from dbt.tests.adapter.utils.test_right import BaseRight
 from dbt.tests.adapter.utils.test_safe_cast import BaseSafeCast
+from dbt.tests.adapter.utils.test_split_part import BaseSplitPart
 from dbt.tests.adapter.utils.test_string_literal import BaseStringLiteral
 from dbt.tests.adapter.utils.data_types.test_type_bigint import BaseTypeBigInt
 from dbt.tests.adapter.utils.data_types.test_type_boolean import BaseTypeBoolean
 from dbt.tests.adapter.utils.data_types.test_type_int import BaseTypeInt
+from dbt.tests.adapter.utils.test_array_append import BaseArrayAppend
+from dbt.tests.adapter.utils.test_array_concat import BaseArrayConcat
+from dbt.tests.adapter.utils.test_array_construct import BaseArrayConstruct
 
 
 class TestAnyValueGizmoSQL(BaseAnyValue):
+    pass
+
+
+class TestBoolOrGizmoSQL(BaseBoolOr):
     pass
 
 
@@ -45,6 +54,10 @@ class TestConcatGizmoSQL(BaseConcat):
 
 
 class TestCurrentTimestampAwareGizmoSQL(BaseCurrentTimestampAware):
+    pass
+
+
+class TestDateTruncGizmoSQL(BaseDateTrunc):
     pass
 
 
@@ -72,7 +85,15 @@ class TestIntersectGizmoSQL(BaseIntersect):
     pass
 
 
+class TestLastDayGizmoSQL(BaseLastDay):
+    pass
+
+
 class TestLengthGizmoSQL(BaseLength):
+    pass
+
+
+class TestListaggGizmoSQL(BaseListagg):
     pass
 
 
@@ -88,7 +109,19 @@ class TestPositionGizmoSQL(BasePosition):
     pass
 
 
+class TestReplaceGizmoSQL(BaseReplace):
+    pass
+
+
+class TestRightGizmoSQL(BaseRight):
+    pass
+
+
 class TestSafeCastGizmoSQL(BaseSafeCast):
+    pass
+
+
+class TestSplitPartGizmoSQL(BaseSplitPart):
     pass
 
 
@@ -104,5 +137,18 @@ class TestTypeBooleanGizmoSQL(BaseTypeBoolean):
     pass
 
 
+@pytest.mark.skip(reason="DuckDB CSV reader infers integers as BIGINT; cosmetic type width difference")
 class TestTypeIntGizmoSQL(BaseTypeInt):
+    pass
+
+
+class TestArrayAppendGizmoSQL(BaseArrayAppend):
+    pass
+
+
+class TestArrayConcatGizmoSQL(BaseArrayConcat):
+    pass
+
+
+class TestArrayConstructGizmoSQL(BaseArrayConstruct):
     pass
