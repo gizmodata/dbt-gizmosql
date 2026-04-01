@@ -97,7 +97,7 @@ class GizmoSQLAdapter(adapter_cls):
         return "datenow()"
 
     def valid_incremental_strategies(self):
-        return ["append", "delete+insert", "merge"]
+        return ["append", "delete+insert", "merge", "microbatch"]
 
     @classmethod
     def render_column_constraint(cls, constraint) -> Optional[str]:
