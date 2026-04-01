@@ -10,7 +10,7 @@ from dbt.tests.adapter.simple_seed.test_seed import (
 )
 
 
-@pytest.mark.skip(reason="DuckDB CSV reader auto-detects format; wrong delimiter produces different error than expected")
+@pytest.mark.skip(reason="DuckDB auto_detect overrides explicit delimiter; test expects syntax error")
 class TestSeedWithWrongDelimiterGizmoSQL(BaseSeedWithWrongDelimiter):
     pass
 

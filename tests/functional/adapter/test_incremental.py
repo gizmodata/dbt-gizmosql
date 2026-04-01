@@ -15,11 +15,9 @@ class TestIncrementalUniqueKeyGizmoSQL(BaseIncrementalUniqueKey):
     pass
 
 
-@pytest.mark.skip(reason="Incremental predicates use delete+insert which differs from default merge strategy")
 class TestIncrementalPredicatesGizmoSQL(BaseIncrementalPredicates):
     pass
 
 
-@pytest.mark.skip(reason="Schema change handling (append/sync columns) not yet implemented for GizmoSQL")
 class TestIncrementalOnSchemaChangeGizmoSQL(BaseIncrementalOnSchemaChange):
     pass

@@ -27,6 +27,9 @@ class GizmoSQLAdapter(adapter_cls):
         """
         return "datenow()"
 
+    def valid_incremental_strategies(self):
+        return ["append", "delete+insert", "merge"]
+
     @available
     def load_seed_from_csv(
         self,

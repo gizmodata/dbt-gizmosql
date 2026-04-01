@@ -137,7 +137,7 @@ class TestTypeBooleanGizmoSQL(BaseTypeBoolean):
     pass
 
 
-@pytest.mark.skip(reason="DuckDB CSV reader infers integers as BIGINT; test expects INTEGER")
+@pytest.mark.skip(reason="DuckDB CSV reader infers integers as BIGINT; cosmetic type width difference")
 class TestTypeIntGizmoSQL(BaseTypeInt):
     pass
 

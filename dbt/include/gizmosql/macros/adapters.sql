@@ -292,6 +292,26 @@ def materialize(df, con):
   {{ return('?') }}
 {% endmacro %}
 
+{% macro gizmosql__alter_relation_add_remove_columns(relation, add_columns, remove_columns) %}
+  {#-- DuckDB/GizmoSQL only supports one ALTER per statement --#}
+  {% if add_columns is none %}{% set add_columns = [] %}{% endif %}
+  {% if remove_columns is none %}{% set remove_columns = [] %}{% endif %}
+
+  {% for column in add_columns %}
+    {% set sql -%}
+      alter {{ relation.type }} {{ relation.render() }} add column {{ column.quoted }} {{ column.expanded_data_type }}
+    {%- endset %}
+    {% do run_query(sql) %}
+  {% endfor %}
+
+  {% for column in remove_columns %}
+    {% set sql -%}
+      alter {{ relation.type }} {{ relation.render() }} drop column {{ column.quoted }}
+    {%- endset %}
+    {% do run_query(sql) %}
+  {% endfor %}
+{% endmacro %}
+
 {#-- Seed loading: use DuckDB client-side for CSV parsing, then ADBC bulk ingest --#}
 {% macro gizmosql__create_csv_table(model, agate_table) %}
   {#-- No-op: table will be created by ADBC ingest in load_csv_rows.
@@ -334,7 +354,11 @@ def materialize(df, con):
     {%- set predicates = [] if incremental_predicates is none else [] + incremental_predicates -%}
     {%- set merge_update_columns = config.get('merge_update_columns') -%}
     {%- set merge_exclude_columns = config.get('merge_exclude_columns') -%}
+    {%- set on_schema_change = config.get('on_schema_change', 'ignore') -%}
     {%- set sql_header = config.get('sql_header', none) -%}
+    {%- set dest_cols_csv = get_quoted_csv(dest_columns | map(attribute="name")) -%}
+    {#-- Use explicit columns when schema may differ or specific columns are configured --#}
+    {%- set use_explicit_columns = merge_update_columns or merge_exclude_columns or on_schema_change in ['ignore', 'append_new_columns', 'sync_all_columns', 'fail'] -%}
 
     {% if unique_key %}
         {% if unique_key is sequence and unique_key is not mapping and unique_key is not string %}
@@ -363,12 +387,29 @@ def materialize(df, con):
                 {{ column_name }} = DBT_INTERNAL_SOURCE.{{ column_name }}
                 {%- if not loop.last %}, {%- endif %}
             {%- endfor %}
+        {%- elif use_explicit_columns %}
+        update set
+            {% for column in dest_columns -%}
+                {{ adapter.quote(column.name) }} = DBT_INTERNAL_SOURCE.{{ adapter.quote(column.name) }}
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
         {%- else %}
         update by name
         {%- endif %}
     {% endif %}
 
-    when not matched then insert by name
+    when not matched then
+        {%- if use_explicit_columns %}
+        insert ({{ dest_cols_csv }})
+        values (
+            {% for column in dest_columns -%}
+                DBT_INTERNAL_SOURCE.{{ adapter.quote(column.name) }}
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
+        )
+        {%- else %}
+        insert by name
+        {%- endif %}
 
 {% endmacro %}
 
