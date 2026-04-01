@@ -61,7 +61,6 @@ class TestIncrementalConstraintsColumnsEqualGizmoSQL(
     pass
 
 
-@pytest.mark.skip(reason="Flight SQL PREPARE cannot handle CREATE TABLE with FOREIGN KEY references")
 class TestConstraintsRuntimeDdlEnforcementGizmoSQL(
     GizmoSQLColumnEqualSetup, BaseConstraintsRuntimeDdlEnforcement
 ):
@@ -74,7 +73,6 @@ class TestConstraintsRollbackGizmoSQL(GizmoSQLColumnEqualSetup, BaseConstraintsR
         return ["NOT NULL constraint failed"]
 
 
-@pytest.mark.skip(reason="Flight SQL PREPARE cannot handle CREATE TABLE with FOREIGN KEY references")
 class TestIncrementalConstraintsRuntimeDdlEnforcementGizmoSQL(
     GizmoSQLColumnEqualSetup, BaseIncrementalConstraintsRuntimeDdlEnforcement
 ):
@@ -89,7 +87,6 @@ class TestIncrementalConstraintsRollbackGizmoSQL(
         return ["NOT NULL constraint failed"]
 
 
-@pytest.mark.skip(reason="Flight SQL PREPARE cannot handle CREATE TABLE with FOREIGN KEY references")
 class TestModelConstraintsRuntimeEnforcementGizmoSQL(
     GizmoSQLColumnEqualSetup, BaseModelConstraintsRuntimeEnforcement
 ):

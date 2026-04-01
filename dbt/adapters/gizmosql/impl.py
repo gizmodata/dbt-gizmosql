@@ -4,8 +4,10 @@ from typing import Dict, List, Optional
 import duckdb
 import pyarrow as pa
 
+from dbt.adapters.base.impl import ConstraintSupport
 from dbt.adapters.base.meta import available
 from dbt.adapters.sql import SQLAdapter as adapter_cls
+from dbt_common.contracts.constraints import ConstraintType
 
 from dbt.adapters.gizmosql import GizmoSQLConnectionManager
 from dbt.adapters.gizmosql.column import DuckDBColumn
@@ -20,6 +22,14 @@ class GizmoSQLAdapter(adapter_cls):
     Relation = GizmoSQLRelation
     ConnectionManager = GizmoSQLConnectionManager
 
+    CONSTRAINT_SUPPORT = {
+        ConstraintType.check: ConstraintSupport.ENFORCED,
+        ConstraintType.not_null: ConstraintSupport.ENFORCED,
+        ConstraintType.unique: ConstraintSupport.ENFORCED,
+        ConstraintType.primary_key: ConstraintSupport.ENFORCED,
+        ConstraintType.foreign_key: ConstraintSupport.ENFORCED,
+    }
+
     @classmethod
     def date_function(cls):
         """
@@ -29,6 +39,34 @@ class GizmoSQLAdapter(adapter_cls):
 
     def valid_incremental_strategies(self):
         return ["append", "delete+insert", "merge"]
+
+    @classmethod
+    def render_column_constraint(cls, constraint) -> Optional[str]:
+        """Override to strip database prefix from FK references.
+
+        DuckDB rejects FOREIGN KEY references with 3-part qualified names
+        (e.g. "db"."schema"."table") as cross-database, even when all
+        objects are in the same database. Strip the catalog prefix.
+        """
+        rendered = super().render_column_constraint(constraint)
+        if rendered and constraint.to and constraint.type.value == "foreign_key":
+            # Strip leading "catalog". from the reference
+            parts = constraint.to.split(".")
+            if len(parts) == 3:
+                schema_table = ".".join(parts[1:])
+                rendered = rendered.replace(constraint.to, schema_table)
+        return rendered
+
+    @classmethod
+    def render_model_constraint(cls, constraint) -> Optional[str]:
+        """Override to strip database prefix from FK references."""
+        rendered = super().render_model_constraint(constraint)
+        if rendered and hasattr(constraint, "to") and constraint.to and constraint.type.value == "foreign_key":
+            parts = constraint.to.split(".")
+            if len(parts) == 3:
+                schema_table = ".".join(parts[1:])
+                rendered = rendered.replace(constraint.to, schema_table)
+        return rendered
 
     @available
     def load_seed_from_csv(
