@@ -1,5 +1,39 @@
 # dbt-gizmosql changelog
 
+## v1.11.15 (2026-04-11)
+
+### Features
+- **`session.remote_sql()` — server-side pushdown for Python models.**
+  Python models run client-side, so `dbt.ref('big_table').filter(...)`
+  streams the entire upstream table across the wire before filtering
+  locally. The new `session.remote_sql(query)` escape hatch runs arbitrary
+  SQL on the GizmoSQL server over the existing ADBC connection and
+  returns only the result as a local DuckDB relation, so filters and
+  aggregations execute server-side and only the matching rows cross the
+  network:
+
+  ```python
+  def model(dbt, session):
+      dbt.config(materialized="table")
+      schema = dbt.this.schema
+      return session.remote_sql(
+          f"select * from {schema}.big_table where name = 'Joe'"
+      )
+  ```
+
+  The `session` arg is now a `_GizmoSQLSession` proxy that delegates every
+  attribute to the underlying local DuckDB connection (`session.sql()`,
+  `session.register()`, etc. keep working unchanged) and adds
+  `remote_sql()` on top — additive, not a replacement. `remote_sql()`
+  returns a chainable relation you can combine with `.filter()`,
+  `.project()`, `.df()`, pandas, etc., or return directly from the model.
+
+### Test suite
+- New `TestPythonRemoteSQLPushdown` functional test: materializes a
+  multi-row upstream table and a Python model that uses
+  `session.remote_sql()` with a `WHERE` filter, then asserts the output
+  table contains exactly the server-filtered rows.
+
 ## v1.11.14 (2026-04-11)
 
 ### Bug fixes
