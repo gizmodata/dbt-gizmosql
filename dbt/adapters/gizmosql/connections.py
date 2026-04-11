@@ -30,6 +30,12 @@ class GizmoSQLCredentials(Credentials):
     tls_skip_verify: bool = field(default=False, kw_only=True)
     auth_type: Optional[str] = field(default=None, kw_only=True)
 
+    # Root path (server-side) for external materializations that do not specify
+    # their own `location`. Resolved on the GizmoSQL server, so it may be a local
+    # filesystem path or any cloud storage URI (s3://, gs://, etc.) supported by
+    # the DuckDB backend.
+    external_root: str = field(default=".", kw_only=True)
+
     _ALIASES = {
         "catalog": "database",
         "dbname": "database",
@@ -79,7 +85,17 @@ class GizmoSQLCredentials(Credentials):
         """
         List of keys to display in the `dbt debug` output.
         """
-        return ("host", "port", "schema", "database", "user", "use_encryption", "tls_skip_verify", "auth_type")
+        return (
+            "host",
+            "port",
+            "schema",
+            "database",
+            "user",
+            "use_encryption",
+            "tls_skip_verify",
+            "auth_type",
+            "external_root",
+        )
 
 
 class GizmoSQLConnectionManager(SQLConnectionManager):

@@ -2,11 +2,12 @@ import importlib.util
 import os
 import tempfile
 import traceback
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import duckdb
 import pyarrow as pa
 
+from dbt.adapters.base.column import Column as BaseColumn
 from dbt.adapters.base.impl import ConstraintSupport
 from dbt.adapters.base.meta import available
 from dbt.adapters.contracts.connection import AdapterResponse
@@ -98,6 +99,110 @@ class GizmoSQLAdapter(adapter_cls):
 
     def valid_incremental_strategies(self):
         return ["append", "delete+insert", "merge", "microbatch"]
+
+    @available
+    def external_root(self) -> str:
+        return self.config.credentials.external_root
+
+    @available
+    def external_write_options(self, write_location: str, rendered_options: Dict[str, Any]) -> str:
+        """Build the DuckDB COPY ... TO options clause for an external write.
+
+        Mirrors dbt-duckdb so that the same set of user-facing config knobs
+        (format, delimiter, partition_by, codec, header, per_thread_output, ...)
+        produce the same COPY options — except the COPY itself runs on the
+        GizmoSQL server instead of the client.
+        """
+        if "format" not in rendered_options:
+            ext = os.path.splitext(write_location)[1].lower()
+            if ext:
+                rendered_options["format"] = ext[1:]
+            elif "delimiter" in rendered_options:
+                rendered_options["format"] = "csv"
+            else:
+                rendered_options["format"] = "parquet"
+
+        if rendered_options["format"] == "csv":
+            rendered_options.setdefault("header", 1)
+
+        if "partition_by" in rendered_options:
+            v = str(rendered_options["partition_by"])
+            if "," in v and not v.startswith("("):
+                rendered_options["partition_by"] = f"({v})"
+
+        quoted_keys = {"delimiter", "quote", "escape", "null"}
+        parts = []
+        for k, v in rendered_options.items():
+            v_str = str(v)
+            if k.lower() in quoted_keys and not v_str.startswith("'"):
+                parts.append(f"{k} '{v_str}'")
+            else:
+                parts.append(f"{k} {v_str}")
+        return ", ".join(parts)
+
+    @available
+    def external_read_location(self, write_location: str, rendered_options: Dict[str, Any]) -> str:
+        """Return the path to read back from after a COPY ... TO.
+
+        For partitioned or per-thread writes the COPY produces a directory tree
+        rather than a single file, so we glob across the partition columns.
+        """
+        if rendered_options.get("partition_by") or rendered_options.get("per_thread_output"):
+            globs = [write_location, "*"]
+            if rendered_options.get("partition_by"):
+                partition_by = str(rendered_options.get("partition_by"))
+                globs.extend(["*"] * len(partition_by.split(",")))
+            return ".".join(["/".join(globs), str(rendered_options.get("format", "parquet"))])
+        return write_location
+
+    @available
+    def location_exists(self, location: str) -> bool:
+        """Probe whether a file/path is readable by the GizmoSQL server."""
+        try:
+            connection = self.connections.get_thread_connection()
+            cursor = connection.handle.cursor()
+            try:
+                cursor.execute(f"SELECT 1 FROM '{location}' WHERE 1=0")
+            finally:
+                cursor.close()
+            return True
+        except Exception:
+            return False
+
+    @available
+    def store_relation(
+        self,
+        plugin_name: Optional[str],
+        relation: Any,
+        column_list: Sequence[BaseColumn],
+        path: str,
+        format: str,
+        config: Any,
+    ) -> None:
+        """Hook for dbt-duckdb-style plugins (e.g. Glue).
+
+        dbt-gizmosql has no plugin system — plugins in dbt-duckdb are a
+        client-side feature — so we surface a clear error if a user tries to
+        set `plugin` or `glue_register` on an external model.
+        """
+        if plugin_name:
+            raise DbtRuntimeError(
+                f"The '{plugin_name}' plugin is not supported by dbt-gizmosql. "
+                "dbt-duckdb plugins (including 'glue') run client-side and have "
+                "no analogue in the server-side gizmosql adapter."
+            )
+
+    @available
+    def warn_once(self, msg: str) -> None:
+        """Emit a warning via the adapter logger (deduplication is best-effort)."""
+        from dbt.adapters.events.logging import AdapterLogger
+
+        if not hasattr(self, "_warned_messages"):
+            self._warned_messages = set()
+        if msg in self._warned_messages:
+            return
+        self._warned_messages.add(msg)
+        AdapterLogger("GizmoSQL").warning(msg)
 
     @classmethod
     def render_column_constraint(cls, constraint) -> Optional[str]:

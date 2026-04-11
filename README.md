@@ -64,6 +64,67 @@ All constraint types are enforced: `CHECK`, `NOT NULL`, `UNIQUE`, `PRIMARY KEY`,
 ### Utility Macros
 DuckDB-compatible overrides for: `dateadd`, `last_day`, `listagg`, `split_part`.
 
+### Writing to External Files (server-side)
+
+Because GizmoSQL is essentially a remote, server-side DuckDB, dbt-gizmosql supports the `external` materialization — models that are backed by Parquet, CSV, or JSON files rather than database tables — with the same config surface as [dbt-duckdb](https://github.com/duckdb/dbt-duckdb?tab=readme-ov-file#writing-to-external-files).
+
+The important distinction: **the `COPY` runs on the GizmoSQL server, not on your dbt client**. That's usually what you want. A production GizmoSQL deployment typically sits on a powerful cloud VM (lots of CPU, lots of RAM, fast local disks, a fat NIC, IAM role for blob storage). Pushing the write to that box is far faster than streaming a multi-GB result set back to the client just to write it out again — and the server's credentials/network topology are exactly what's needed to reach the destination.
+
+```sql
+{{ config(materialized='external', location='/data/warehouse/fact_orders.parquet') }}
+select m.*, s.id is not null as has_source_id
+from {{ ref('upstream_model') }} m
+left join {{ source('upstream', 'source') }} s using (id)
+```
+
+#### Configuration
+
+| Option | Default | Description |
+| :---:  | :---:   | --- |
+| `location` | [`external_location`](dbt/include/gizmosql/macros/utils/external_location.sql) macro | Server-side path (or S3/GCS/Azure URI) to write to. See below. |
+| `format` | `parquet` | One of `parquet`, `csv`, `json`. Inferred from the `location` extension when omitted. |
+| `delimiter` | `,` | For CSV, the field delimiter. |
+| `options` | `{}` | Any other options for DuckDB's `COPY` statement — e.g. `compression`, `partition_by`, `codec`, `per_thread_output`. |
+| `parquet_read_options` | `{'union_by_name': False}` | Options passed to `read_parquet()` when building the read-side view. |
+| `csv_read_options` | `{'auto_detect': True}` | Options passed to `read_csv()`. |
+| `json_read_options` | `{'auto_detect': True}` | Options passed to `read_json()`. |
+
+If `location` is omitted, the file is written to `{external_root}/{model_name}.{format}`. Set `external_root` in your profile to control the default write location (local path or cloud URI):
+
+```yaml
+my-gizmosql-db:
+  target: dev
+  outputs:
+    dev:
+      type: gizmosql
+      host: gizmosql.prod.example.com
+      port: 31337
+      auth_type: external
+      use_encryption: True
+      external_root: "s3://my-warehouse/dbt-output"
+```
+
+The `external_root` is resolved **on the GizmoSQL server**, so any path/URI the server's DuckDB backend can reach works — local filesystem paths, `s3://...`, `gs://...`, `azure://...`, etc. Any credentials needed to write there live on the server, not on your dbt client.
+
+After the write, dbt-gizmosql creates a view over the file via `read_parquet` / `read_csv` / `read_json`, so downstream models can `ref()` the external model like any other relation.
+
+#### Partitioning example
+
+```sql
+{{ config(
+    materialized='external',
+    format='parquet',
+    options={'partition_by': 'year, month', 'compression': 'zstd'}
+) }}
+select * from {{ ref('fact_events') }}
+```
+
+#### Notes and limitations
+
+- The directory referenced by `external_root` (or the parent directory of an explicit `location`) must already exist on the server — DuckDB's `COPY ... TO '<file>'` does not create parent directories for single-file writes. Cloud URIs like `s3://bucket/prefix` don't have this constraint.
+- Incremental strategies are not supported on `external` models — each run fully replaces the file(s).
+- dbt-duckdb's `plugin` / `glue_register` options are **not** supported: those are a client-side feature of dbt-duckdb with no analogue on the server. Setting either will produce a clear compile-time error.
+
 ## Installation
 
 ### Option 1 - from PyPi
