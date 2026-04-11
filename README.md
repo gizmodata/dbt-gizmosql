@@ -46,6 +46,22 @@ def model(dbt, session):
 - `dbt.ref()` and `dbt.source()` fetch data from GizmoSQL as Arrow and expose it as DuckDB relations
 - Incremental Python models supported (with proper `dbt.is_incremental` handling)
 
+#### Server-side pushdown with `session.remote_sql()`
+
+Because Python models run client-side, `dbt.ref('big_table').filter(...)` pulls the **entire** upstream table over the network before filtering locally. When you only need a small slice of a large server-side table, use `session.remote_sql(query)` to push the query down to the GizmoSQL server — the filter/aggregation runs server-side and only the result crosses the wire:
+
+```python
+def model(dbt, session):
+    dbt.config(materialized="table")
+    schema = dbt.this.schema
+    # Runs on the GizmoSQL server; only matching rows come back.
+    return session.remote_sql(
+        f"select * from {schema}.big_table where name = 'Joe'"
+    )
+```
+
+`remote_sql()` returns a chainable local DuckDB relation, so you can combine it with the usual `.filter()`, `.project()`, `.df()`, pandas, etc. The rest of the `session` object behaves exactly like a local DuckDB connection (`session.sql(...)`, `session.register(...)`, …) — `remote_sql` is an additive escape hatch, not a replacement.
+
 ### Seed Loading
 Seeds are loaded using DuckDB's CSV reader on the client side with ADBC bulk ingest to the server:
 

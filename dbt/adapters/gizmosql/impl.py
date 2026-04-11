@@ -20,6 +20,54 @@ from dbt.adapters.gizmosql.column import DuckDBColumn
 from dbt.adapters.gizmosql.relation import GizmoSQLRelation
 
 
+class _GizmoSQLSession:
+    """Session proxy passed as the `session` arg to Python models.
+
+    Delegates everything to a local in-process DuckDB (so `session.sql(...)`,
+    `session.execute(...)`, `session.register(...)` and friends keep working
+    exactly as before), but adds `remote_sql(query)` — a pushdown escape
+    hatch that runs arbitrary SQL on the GizmoSQL server over the existing
+    ADBC connection and returns the result as a local DuckDB relation,
+    without first pulling whole upstream tables across the wire.
+
+    Intended use: when a Python model only needs a small slice of a large
+    server-side table, `dbt.ref('big_table')` would stream the entire table
+    back to the client. `session.remote_sql("select ... where ...")` lets
+    the filter/aggregation run on GizmoSQL and only the result crosses the
+    network.
+    """
+
+    def __init__(self, local_db, adbc_conn):
+        self._local_db = local_db
+        self._adbc_conn = adbc_conn
+        self._remote_counter = 0
+
+    def remote_sql(self, query: str) -> "_DuckDBDataFrame":
+        """Execute `query` on the GizmoSQL server and return a local relation.
+
+        The Arrow result is registered in the local DuckDB under a unique
+        name so the returned `_DuckDBDataFrame` is fully chainable
+        (`.filter()`, `.project()`, `.df()`, `.to_arrow_table()`, etc.)
+        and can be returned directly from a Python model.
+        """
+        cursor = self._adbc_conn.cursor()
+        try:
+            cursor.execute(query)
+            arrow_table = cursor.fetch_arrow_table()
+        finally:
+            cursor.close()
+
+        self._remote_counter += 1
+        view_name = f"_gizmosql_remote_{self._remote_counter}"
+        self._local_db.register(view_name, arrow_table)
+        return _DuckDBDataFrame(self._local_db.query(f"SELECT * FROM {view_name}"))
+
+    def __getattr__(self, name):
+        # Delegate any attribute we don't own to the underlying local DuckDB
+        # connection so existing python-model code keeps working unchanged.
+        return getattr(self._local_db, name)
+
+
 class _DuckDBDataFrame:
     """Wrapper around a DuckDB relation that also supports pandas-style operations.
 
@@ -373,9 +421,12 @@ class GizmoSQLAdapter(adapter_cls):
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
 
-            # Run the model
+            # Run the model. `session` is a proxy that delegates to the
+            # local DuckDB but also exposes `remote_sql()` for server-side
+            # pushdown — see `_GizmoSQLSession`.
             dbt_obj = module.dbtObj(load_df_function)
-            df = module.model(dbt_obj, local_db)
+            session = _GizmoSQLSession(local_db, adbc_conn)
+            df = module.model(dbt_obj, session)
 
             # Materialize: convert result to Arrow and ship to GizmoSQL
             if isinstance(df, _DuckDBDataFrame):
