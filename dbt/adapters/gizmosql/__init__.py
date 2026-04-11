@@ -5,7 +5,7 @@ from dbt.adapters.gizmosql.connections import GizmoSQLCredentials
 from dbt.adapters.gizmosql.impl import GizmoSQLAdapter
 from dbt.include import gizmosql
 
-__version__ = "1.11.13"
+__version__ = "1.11.14"
 
 Plugin = AdapterPlugin(
     adapter=GizmoSQLAdapter,
