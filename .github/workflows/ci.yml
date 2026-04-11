@@ -55,9 +55,52 @@ jobs:
         if: startsWith(github.ref, 'refs/tags')
         uses: pypa/gh-action-pypi-publish@release/v1
 
+      - name: Extract changelog section for this tag
+        id: changelog
+        if: startsWith(github.ref, 'refs/tags')
+        run: |
+          # Strip the leading 'v' from the tag (refs/tags/v1.2.3 -> 1.2.3).
+          version="${GITHUB_REF_NAME#v}"
+
+          # Slice CHANGELOG.md from the matching "## vX.Y.Z " header up to
+          # the next "## v" header, exclusive of both. `index($0, header)`
+          # avoids regex-escaping dots in the version; the trailing space
+          # in `header` means "## v1.11.1" won't accidentally match a
+          # request for v1.11.14.
+          notes=$(awk -v header="## v${version} " '
+            index($0, header) == 1 { p=1; next }
+            p && /^## v/ { exit }
+            p { print }
+          ' CHANGELOG.md)
+
+          # Trim leading/trailing blank lines.
+          notes=$(printf '%s\n' "$notes" | awk '
+            NF { found=1 }
+            found { buf = buf $0 ORS }
+            END {
+              sub(/\n+$/, "", buf)
+              print buf
+            }
+          ')
+
+          {
+            echo "notes<<CHANGELOG_EOF"
+            if [ -n "$notes" ]; then
+              echo "$notes"
+            else
+              echo "_No CHANGELOG.md entry found for \`v${version}\`._"
+            fi
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags')
         uses: softprops/action-gh-release@v2
         with:
+          # Hybrid release notes: the curated CHANGELOG.md section for this
+          # tag goes at the top; the auto-generated list of PRs/commits
+          # since the previous tag is appended below by
+          # `generate_release_notes: true`.
+          body: ${{ steps.changelog.outputs.notes }}
           generate_release_notes: true
           files: dist/*
