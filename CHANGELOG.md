@@ -34,6 +34,8 @@
   `session.remote_sql()` with a `WHERE` filter, then asserts the output
   table contains exactly the server-filtered rows.
 
+🙏 Thanks to: @maartenbosteels for the feature idea!
+
 ## v1.11.14 (2026-04-11)
 
 ### Bug fixes
