@@ -317,6 +317,30 @@ def materialize(df, con):
   {{ return('?') }}
 {% endmacro %}
 
+{#-- Override the LIMIT-subquery helper so `dbt show` works on Python models.
+     The default implementation wraps `compiled_code` in `LIMIT N` and hands
+     the result to `adapter.execute`. For SQL models that's fine. For Python
+     models, `compiled_code` is literal Python source, so the wrapped string
+     produces a `Parser Error: syntax error at or near "def"` (and the
+     downstream `task_end_messages` then dereferences the NoneType agate
+     table — see issue #6). Since Python models are always materialized as
+     a real relation before `dbt show` runs, we can safely select from the
+     target relation directly. --#}
+{% macro gizmosql__get_limit_sql(sql, limit) %}
+  {%- if model is defined
+         and model is mapping
+         and model.get('language') == 'python'
+         and this is defined -%}
+    select * from {{ this }}
+    {%- if limit is not none %} limit {{ limit }}{%- endif %}
+  {%- else -%}
+    {{ sql }}
+    {%- if limit is not none %}
+    limit {{ limit }}
+    {%- endif %}
+  {%- endif -%}
+{% endmacro %}
+
 {% macro gizmosql__alter_relation_add_remove_columns(relation, add_columns, remove_columns) %}
   {#-- DuckDB/GizmoSQL only supports one ALTER per statement --#}
   {% if add_columns is none %}{% set add_columns = [] %}{% endif %}
