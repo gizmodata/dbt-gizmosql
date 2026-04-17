@@ -6,7 +6,7 @@ A [dbt](https://www.getdbt.com/product/what-is-dbt) adapter for [GizmoSQL](https
 [![dbt-gizmosql-ci](https://github.com/gizmodata/dbt-gizmosql/actions/workflows/ci.yml/badge.svg)](https://github.com/gizmodata/dbt-gizmosql/actions/workflows/ci.yml)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/dbt-gizmosql)](https://pypi.org/project/dbt-gizmosql/)
 [![PyPI version](https://badge.fury.io/py/dbt-gizmosql.svg)](https://badge.fury.io/py/dbt-gizmosql)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/dbt-gizmosql.svg)](https://pypi.org/project/dbt-gizmosql/)
+[![PyPI Downloads](https://img.shields.io/pepy/dt/dbt-gizmosql.svg)](https://pypi.org/project/dbt-gizmosql/)
 
 **[dbt](https://www.getdbt.com/)** enables data analysts and engineers to transform their data using the same practices that software engineers use to build applications.
 
