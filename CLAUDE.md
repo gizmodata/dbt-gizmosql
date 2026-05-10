@@ -34,8 +34,12 @@ Version tracks dbt-core (e.g., dbt-core 1.11.x → dbt-gizmosql 1.11.x).
 - **GitHub releases**: Uses `softprops/action-gh-release@v2` with auto-generated release notes
 
 ## Testing
-- Tests require a GizmoSQL Docker container (auto-started by `tests/conftest.py` on port 31337)
-- Ensure port 31337 is free before running tests
+- The GizmoSQL test server is started as a subprocess by `tests/conftest.py`
+  via the [`gizmosql`](https://pypi.org/project/gizmosql/) package — no Docker
+  needed for the server itself. The package auto-picks a free port.
+- `tests/functional/adapter/test_external.py` still uses Docker for a MinIO
+  sidecar (bound to `localhost:9000`) to exercise S3 writes; ensure Docker
+  is running and port 9000 is free if you run that file.
 - Run: `pytest tests/`
 
 ## Dependencies (main)
