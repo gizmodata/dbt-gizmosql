@@ -1,5 +1,30 @@
 # dbt-gizmosql changelog
 
+## v1.11.16 (2026-05-10)
+
+### Test suite
+- Replaced the Docker-managed GizmoSQL test server with the new
+  [`gizmosql`](https://pypi.org/project/gizmosql/) PyPI package. The test
+  fixture now starts the server as a subprocess via
+  `gizmosql.Server(...)`, which auto-picks a free port (enabling parallel
+  pytest workers), guarantees client/server release parity, and drops the
+  custom Docker log-poller. Local development no longer requires Docker
+  Desktop running for the GizmoSQL server itself.
+- Refactored `test_external.py`'s MinIO sidecar to bind to
+  `localhost:9000` instead of routing through a user-defined Docker
+  bridge network with container aliases — the GizmoSQL subprocess is now
+  on the host, so the network gymnastics are no longer needed.
+- Removed `test.env` and the `pytest-dotenv` dependency; test fixtures
+  construct connection details directly from the `Server` object.
+
+### Dependency updates
+- Bumped `dbt-core` to `~=1.11.9`, `dbt-common` to `~=1.38.0`, and
+  `dbt-adapters` to `~=1.23.0`.
+- Bumped `adbc-driver-gizmosql` minimum to `>=1.1.6`.
+- Added `gizmosql` as a dev dependency (the new test-fixture driver);
+  `docker` is retained for the MinIO sidecar still used by
+  `test_external.py`.
+
 ## v1.11.15 (2026-04-11)
 
 ### Features
