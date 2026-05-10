@@ -14,19 +14,17 @@ import pytest
 
 from dbt.adapters.contracts.connection import Connection, ConnectionState
 from dbt.adapters.gizmosql.connections import GizmoSQLConnectionManager, GizmoSQLCredentials
-from tests.conftest import GIZMOSQL_PORT
 
 
 @pytest.fixture()
 def credentials(gizmosql_server):
-    """Build GizmoSQLCredentials pointing at the test container."""
+    """Build GizmoSQLCredentials pointing at the test server."""
     return GizmoSQLCredentials(
-        host="localhost",
-        port=GIZMOSQL_PORT,
-        username="dbt",
-        password="dbt",
-        use_encryption=True,
-        tls_skip_verify=True,
+        host=gizmosql_server.host,
+        port=gizmosql_server.port,
+        username=gizmosql_server.username,
+        password=gizmosql_server.password,
+        use_encryption=False,
     )
 
 

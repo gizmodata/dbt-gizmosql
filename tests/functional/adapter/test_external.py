@@ -67,13 +67,12 @@ class BaseExternal:
         return {
             "type": "gizmosql",
             "threads": 1,
-            "host": "localhost",
-            "port": 31337,
-            "username": "dbt",
-            "password": "dbt",
+            "host": gizmosql_server.host,
+            "port": gizmosql_server.port,
+            "username": gizmosql_server.username,
+            "password": gizmosql_server.password,
             "database": "dbt",
-            "use_encryption": True,
-            "tls_skip_verify": True,
+            "use_encryption": False,
             "external_root": external_root,
         }
 
@@ -490,38 +489,18 @@ MINIO_PORT = 9000
 MINIO_USER = "minioadmin"
 MINIO_PASSWORD = "minioadmin"
 S3_BUCKET = "dbt-gizmosql-test"
-MINIO_NETWORK_NAME = "dbt-gizmosql-test-net"
-MINIO_ALIAS = "minio-test"  # Reachable by name from the GizmoSQL container.
+MINIO_ENDPOINT = f"localhost:{MINIO_PORT}"
 
 
 @pytest.fixture(scope="class")
-def minio_server(gizmosql_server, tmp_path_factory):
-    """Spin up a MinIO container on a shared docker network with GizmoSQL.
-
-    Using a user-defined bridge network (rather than publishing MinIO's port
-    to the host and using `host.docker.internal`) means the test works the
-    same on Linux CI and macOS Docker Desktop without relying on
-    host-gateway magic or risking port collisions on the CI runner.
+def minio_server(tmp_path_factory):
+    """Spin up a MinIO container bound to localhost so the GizmoSQL subprocess
+    (also on localhost) can reach it as ``localhost:9000``.
 
     The bucket is pre-created via a tmpdir bind-mount, which doubles as the
     host-side spy we use to verify that the server actually wrote objects.
     """
     client = docker.from_env()
-
-    # Create (or reuse) a user-defined bridge network that both containers
-    # sit on. Container name resolution works on user-defined bridges.
-    try:
-        network = client.networks.get(MINIO_NETWORK_NAME)
-    except docker.errors.NotFound:
-        network = client.networks.create(MINIO_NETWORK_NAME, driver="bridge")
-
-    # Attach the existing GizmoSQL container to the shared network so it can
-    # resolve the MinIO alias — no-op if already attached.
-    try:
-        network.connect(gizmosql_server, aliases=["gizmosql-test"])
-    except docker.errors.APIError as err:
-        if "already exists" not in str(err).lower():
-            raise
 
     # Drop any stale MinIO container from a prior aborted run.
     try:
@@ -541,21 +520,13 @@ def minio_server(gizmosql_server, tmp_path_factory):
         detach=True,
         remove=True,
         tty=True,
-        network=MINIO_NETWORK_NAME,
+        ports={f"{MINIO_PORT}/tcp": MINIO_PORT},
         environment={
             "MINIO_ROOT_USER": MINIO_USER,
             "MINIO_ROOT_PASSWORD": MINIO_PASSWORD,
         },
         volumes={str(storage_root): {"bind": "/data", "mode": "rw"}},
     )
-
-    # Give the container an explicit network alias the GizmoSQL server can
-    # resolve — belt-and-braces over the auto-assigned container-name alias.
-    try:
-        network.disconnect(container)
-        network.connect(container, aliases=[MINIO_ALIAS])
-    except docker.errors.APIError:
-        pass
 
     try:
         deadline = time.time() + 30
@@ -574,14 +545,6 @@ def minio_server(gizmosql_server, tmp_path_factory):
     finally:
         try:
             container.stop()
-        except Exception:
-            pass
-        try:
-            network.disconnect(gizmosql_server, force=True)
-        except Exception:
-            pass
-        try:
-            network.remove()
         except Exception:
             pass
 
@@ -620,7 +583,7 @@ class TestExternalS3(BaseExternal):
                     "  TYPE S3,"
                     f"  KEY_ID '{MINIO_USER}',"
                     f"  SECRET '{MINIO_PASSWORD}',"
-                    f"  ENDPOINT '{MINIO_ALIAS}:{MINIO_PORT}',"
+                    f"  ENDPOINT '{MINIO_ENDPOINT}',"
                     "  URL_STYLE 'path',"
                     "  USE_SSL false"
                     ")"
