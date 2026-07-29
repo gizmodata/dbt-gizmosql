@@ -1,6 +1,6 @@
 # dbt-gizmosql changelog
 
-## Unreleased
+## v1.12.0 (2026-07-29)
 
 ### Dependency updates
 - Bumped the `adbc-driver-gizmosql` minimum to `>=2.0.0`, powered by the
