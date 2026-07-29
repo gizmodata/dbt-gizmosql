@@ -214,7 +214,7 @@ my-gizmosql-db:
 
 ## Architecture
 
-This adapter connects to GizmoSQL via Apache Arrow Flight SQL using the [ADBC](https://arrow.apache.org/adbc/) driver (`adbc-driver-gizmosql`). Key architectural decisions:
+This adapter connects to GizmoSQL via Apache Arrow Flight SQL using the [ADBC](https://arrow.apache.org/adbc/) driver (`adbc-driver-gizmosql`). As of v1.12.0, the adapter runs on `adbc-driver-gizmosql` 2.0, powered by the new [native Go GizmoSQL ADBC driver](https://github.com/gizmodata/gizmosql-adbc) -- same API as before, with GizmoSQL's DDL/DML immediate-execution handling, `RETURNING` support, `gizmosql://` URIs, and OAuth/SSO now provided by the shared Go driver library used across all languages. Key architectural decisions:
 
 - **Autocommit mode**: Each statement auto-commits immediately. Flight SQL's `PREPARE` phase validates against committed catalog state, so explicit transactions would cause DDL from earlier statements to be invisible to later ones.
 - **Client-side DuckDB**: Seeds and Python models use a local DuckDB instance for processing, with results shipped to the server via ADBC bulk ingest (Arrow columnar format over gRPC).

@@ -16,30 +16,30 @@ classifiers = [
 ]
 keywords = ["dbt", "gizmosql", "flightsql", "duckdb", "adbc", "gizmodata"]
 dependencies = [
-  "dbt-core~=1.11.9",
+  "dbt-core~=1.12.0",
   "dbt-common~=1.38.0",
-  "dbt-adapters~=1.23.0",
-  "adbc-driver-gizmosql>=1.1.6",
-  "duckdb>=1.0.0",
-  "pandas>=2.0.0"
+  "dbt-adapters~=1.24.5",
+  "adbc-driver-gizmosql>=2.0.0",
+  "duckdb>=1.5.5",
+  "pandas>=3.0.0"
 ]
 [project.optional-dependencies]
 dev = [
     "pip-tools",
     "pytest",
-    "dbt-tests-adapter==1.19.*",
-    "black==24.2.0",
+    "dbt-tests-adapter==1.20.*",
+    "black==26.5.1",
     "bumpversion",
     "flake8",
     "flaky",
     "freezegun==1.5.5",
     "ipdb",
-    "mypy==1.8.0",
+    "mypy==2.3.0",
     "pre-commit",
     "pytest-csv",
     "pytest-xdist",
     "pytz",
-    "tox>=3.13",
+    "tox>=4.58",
     "twine",
     "wheel",
     "gizmosql",

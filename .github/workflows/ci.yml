@@ -12,10 +12,10 @@ jobs:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing to PyPi
       contents: write  # Required for creating GitHub releases
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -46,7 +46,7 @@ jobs:
           .
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -95,7 +95,7 @@ jobs:
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # Hybrid release notes: the curated CHANGELOG.md section for this
           # tag goes at the top; the auto-generated list of PRs/commits

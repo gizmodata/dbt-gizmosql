@@ -1,5 +1,27 @@
 # dbt-gizmosql changelog
 
+## Unreleased
+
+### Dependency updates
+- Bumped the `adbc-driver-gizmosql` minimum to `>=2.0.0`, powered by the
+  new [native Go GizmoSQL ADBC driver](https://github.com/gizmodata/gizmosql-adbc).
+  Same API as 1.x — GizmoSQL's DDL/DML immediate-execution (statement
+  routing) handling, `RETURNING` support, `gizmosql://` URIs, and the
+  OAuth/SSO flow now live in the shared Go driver library used across
+  all languages; adapter behavior is unchanged.
+- Bumped runtime dependency floors to current stable releases:
+  `dbt-core` to `~=1.12.0`, `dbt-adapters` to `~=1.24.5`, `duckdb` to
+  `>=1.5.5`, `pandas` to `>=3.0.0` (`dbt-common` stays at `~=1.38.0`,
+  already latest).
+- Bumped dev-extra pins: `dbt-tests-adapter` to `==1.20.*`, `black` to
+  `==26.5.1`, `mypy` to `==2.3.0`, `tox` to `>=4.58`.
+
+### CI
+- Bumped GitHub Actions to current majors: `actions/checkout@v7`,
+  `actions/setup-python@v7`, `actions/upload-artifact@v7`, and
+  `softprops/action-gh-release@v3` (`pypa/gh-action-pypi-publish` stays
+  on the floating `release/v1` branch).
+
 ## v1.11.16 (2026-05-10)
 
 ### Test suite
