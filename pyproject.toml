@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbt-gizmosql"
-version = "1.12.0"
+version = "1.12.1"
 description = "The GizmoSQL adapter plugin for dbt"
 readme = "README.md"
 authors = [{ name = "Philip Moore", email = "philip@gizmodata.com" }]
@@ -19,7 +19,7 @@ dependencies = [
   "dbt-core~=1.12.0",
   "dbt-common~=1.38.0",
   "dbt-adapters~=1.24.5",
-  "adbc-driver-gizmosql>=2.0.0",
+  "adbc-driver-gizmosql>=2.0.8",
   "duckdb>=1.5.5",
   "pandas>=3.0.0"
 ]
