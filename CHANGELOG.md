@@ -1,5 +1,22 @@
 # dbt-gizmosql changelog
 
+## v1.12.2 (2026-09-11)
+
+### Bug fixes
+- The package `__version__` (`dbt/adapters/gizmosql/__init__.py`,
+  `__version__.py`) and the bundled `dbt_project.yml` version were left at
+  `1.12.0` in the v1.12.1 release; all four version files now agree with
+  `pyproject.toml`.
+
+### Dependency updates
+- Require `adbc-driver-gizmosql` >= 2.0.13. Picks up server-side query
+  cancellation on Ctrl+C / statement close (2.0.9, 2.0.12), auto-prepare
+  for bound parameters (2.0.10), and the 2.0.13 fix for parameterized
+  DDL/DML issued via `cursor.execute(sql, params)` being silently lost.
+- Bumped `dbt-common` to `~=1.39.0` (`dbt-core ~=1.12.0` now resolves to
+  1.12.4, which requires `dbt-common >= 1.37.5`).
+- Bumped dev-extra pins: `mypy` to `==2.3.1`, `tox` to `>=4.61`.
+
 ## v1.12.1 (2026-08-24)
 
 ### Dependency updates
