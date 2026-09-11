@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbt-gizmosql"
-version = "1.12.1"
+version = "1.12.2"
 description = "The GizmoSQL adapter plugin for dbt"
 readme = "README.md"
 authors = [{ name = "Philip Moore", email = "philip@gizmodata.com" }]
@@ -17,9 +17,9 @@ classifiers = [
 keywords = ["dbt", "gizmosql", "flightsql", "duckdb", "adbc", "gizmodata"]
 dependencies = [
   "dbt-core~=1.12.0",
-  "dbt-common~=1.38.0",
+  "dbt-common~=1.39.0",
   "dbt-adapters~=1.24.5",
-  "adbc-driver-gizmosql>=2.0.8",
+  "adbc-driver-gizmosql>=2.0.13",
   "duckdb>=1.5.5",
   "pandas>=3.0.0"
 ]
@@ -34,12 +34,12 @@ dev = [
     "flaky",
     "freezegun==1.5.5",
     "ipdb",
-    "mypy==2.3.0",
+    "mypy==2.3.1",
     "pre-commit",
     "pytest-csv",
     "pytest-xdist",
     "pytz",
-    "tox>=4.58",
+    "tox>=4.61",
     "twine",
     "wheel",
     "gizmosql",
