@@ -1,5 +1,33 @@
 # dbt-gizmosql changelog
 
+## v1.12.3 (2026-09-30)
+
+### Features
+- Python models can now return Arrow record batches in addition to full
+  `pyarrow.Table`s: a single `pyarrow.RecordBatch`, a
+  `pyarrow.RecordBatchReader`, a list or generator of `RecordBatch`es, or
+  any object implementing the Arrow PyCapsule stream protocol
+  (`__arrow_c_stream__`, e.g. a polars DataFrame). Readers, generators and
+  stream objects are streamed to GizmoSQL via ADBC bulk ingest batch by
+  batch instead of being collected into one table in client memory. Empty
+  streams still create an (empty) table from the stream's schema.
+
+### Dependency updates
+- Bumped runtime dependency floors: `dbt-core` to `~=1.12.5`, `duckdb` to
+  `>=1.5.6`, `pandas` to `>=3.0.6` (`dbt-common`, `dbt-adapters` and
+  `adbc-driver-gizmosql` are already at their latest releases).
+- Bumped dev-extra pin: `tox` to `>=4.64`.
+
+### Test suite
+- Added functional tests for each record batch return type (single batch,
+  multi-batch reader, generator, list, `__arrow_c_stream__` object, empty
+  and zero-row-batch streams) and for an incremental Python model that
+  returns a generator of batches.
+- Added the first unit tests (`tests/unit/`) covering how model results are
+  normalized for ingest: which results are streamed vs. materialized, that
+  generators are consumed lazily, empty-stream handling, and error messages
+  for iterables that aren't record batches.
+
 ## v1.12.2 (2026-09-11)
 
 ### Bug fixes
