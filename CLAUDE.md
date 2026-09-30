@@ -29,7 +29,7 @@ Version tracks dbt-core (e.g., dbt-core 1.11.x → dbt-gizmosql 1.11.x).
 ## CI/CD
 - **Workflow**: `.github/workflows/ci.yml`
 - **Trigger**: Every push (and `workflow_dispatch`) runs the tests; pushes of `v*` tags also publish
-- **Pipeline**: `test` job (Python 3.11 / 3.12 / 3.13 matrix) → `build-n-publish` job (needs `test`): Build wheel/sdist → Publish to PyPI → Create GitHub Release (the last two on tags only)
+- **Pipeline**: `test` job (Python 3.11 / 3.12 / 3.13 / 3.14 matrix) → `build-n-publish` job (needs `test`): Build wheel/sdist → Publish to PyPI → Create GitHub Release (the last two on tags only)
 - **PyPI publishing**: Uses trusted publishing (`id-token: write`)
 - **GitHub releases**: Uses `softprops/action-gh-release@v3`; the body is the tag's `CHANGELOG.md` section followed by auto-generated release notes, with `dist/*` attached
 - **Python versions**: `requires-python = ">=3.11"` (pandas 3 needs it); keep the CI matrix, classifiers and `tox.ini` envlist in sync
@@ -45,7 +45,7 @@ Version tracks dbt-core (e.g., dbt-core 1.11.x → dbt-gizmosql 1.11.x).
 - `tests/functional/adapter/test_ducklake.py` attaches a local DuckLake
   catalog to the test server (the `ducklake` extension is auto-installed).
 - `tests/unit/` needs no server.
-- Run: `pytest tests/` (or `tox` for the 3.11–3.13 matrix). Lint: `pre-commit run --all-files`.
+- Run: `pytest tests/` (or `tox` for the 3.11–3.14 matrix). Lint: `pre-commit run --all-files`.
 
 ## Dependencies (main)
 - `dbt-core`, `dbt-common`, `dbt-adapters` — use `~=` (compatible release) pinning
