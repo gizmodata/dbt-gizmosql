@@ -1,5 +1,12 @@
 # dbt-gizmosql changelog
 
+## v1.12.6 (2026-09-30)
+
+### Changes
+- Added Python 3.14 support: it is now tested in CI (alongside 3.11–3.13),
+  listed in the package classifiers, and in the `tox` envlist. No code
+  changes were needed — the full suite passes on 3.14.
+
 ## v1.12.5 (2026-09-30)
 
 ### Bug fixes
