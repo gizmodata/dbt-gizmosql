@@ -1,5 +1,22 @@
 # dbt-gizmosql changelog
 
+## v1.12.7 (2026-09-30)
+
+### Changes
+- Errors caused by a DuckLake catalog's Postgres metadata connection being
+  closed mid-transaction — typically the metadata server's
+  `idle_in_transaction_session_timeout` killing a long write, which surfaces
+  as `Failed to commit: Failed to execute query "ROLLBACK": ` with an empty
+  Postgres error — now carry a hint explaining the cause and the fixes (raise
+  the timeout for the catalog, or shorten the write). Applies to Python model
+  ingests and SQL statements.
+- README: the DuckLake section explains that a streamed Python model result
+  keeps DuckLake's metadata transaction open for the whole source extraction.
+
+### Test suite
+- Unit tests for the DuckLake metadata-timeout hint, using the exact error
+  text reported from a dbt run.
+
 ## v1.12.6 (2026-09-30)
 
 ### Changes
