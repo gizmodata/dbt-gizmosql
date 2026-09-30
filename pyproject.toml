@@ -16,12 +16,12 @@ classifiers = [
 ]
 keywords = ["dbt", "gizmosql", "flightsql", "duckdb", "adbc", "gizmodata"]
 dependencies = [
-  "dbt-core~=1.12.0",
+  "dbt-core~=1.12.5",
   "dbt-common~=1.39.0",
   "dbt-adapters~=1.24.5",
   "adbc-driver-gizmosql>=2.0.13",
-  "duckdb>=1.5.5",
-  "pandas>=3.0.0"
+  "duckdb>=1.5.6",
+  "pandas>=3.0.6"
 ]
 [project.optional-dependencies]
 dev = [
@@ -39,7 +39,7 @@ dev = [
     "pytest-csv",
     "pytest-xdist",
     "pytz",
-    "tox>=4.61",
+    "tox>=4.64",
     "twine",
     "wheel",
     "gizmosql",
