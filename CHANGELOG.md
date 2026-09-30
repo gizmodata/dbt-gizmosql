@@ -1,5 +1,60 @@
 # dbt-gizmosql changelog
 
+## v1.12.5 (2026-09-30)
+
+### Bug fixes
+- Models in a [DuckLake](https://ducklake.select/) catalog failed whenever dbt
+  replaced an existing relation, with `Not implemented Error: Cascade Drop not
+  supported in DuckLake`. The adapter now looks up each catalog's type in the
+  server's `duckdb_databases()` (cached per catalog, exposed to macros as
+  `adapter.get_catalog_type(database)`) and drops tables/views in DuckLake
+  catalogs without `CASCADE`. Other catalogs are unchanged.
+- Contract constraints DuckLake can't create (`PRIMARY KEY`, `UNIQUE`,
+  `CHECK`, `FOREIGN KEY`) and the `indexes` config made models in a DuckLake
+  catalog fail at `CREATE TABLE`/`CREATE INDEX`. In DuckLake catalogs they are
+  now skipped with a warning — dbt's usual treatment of unsupported
+  constraints, honoring `warn_unsupported: false` — while `NOT NULL` is still
+  applied and enforced.
+- An empty Python model result created its table with every column typed
+  `VARCHAR` (ADBC bulk ingest can't create a table from zero rows, so the
+  adapter creates it itself). An incremental model whose first load was empty
+  was therefore stuck with text columns, and later appends were cast to text.
+  Empty results now get the exact column types a non-empty ingest would
+  produce (decimals, time-zone-aware timestamps, lists, structs, ...).
+- An empty seed (header only) never created its table: dbt skips loading rows
+  for an empty CSV, and the table was only created by that load step. Empty
+  seeds now create their table — with `column_types` overrides applied, which
+  the empty-seed path also ignored.
+
+### Changes
+- Declared `requires-python = ">=3.11"` (already required in practice by
+  `pandas>=3`), so installs on older Pythons fail with a clear message instead
+  of a resolver error, and added Python 3.11–3.13 classifiers.
+- Fixed the `.flake8` config, which newer flake8 releases refuse to parse
+  (inline comments in the `ignore` list), and updated the pre-commit hooks to
+  current releases: pre-commit-hooks v6.0.0, black 26.5.1 (now from
+  `psf/black-pre-commit-mirror`), flake8 7.4.1, mypy v2.3.1; Python target
+  `py311`. Applied black formatting and fixed the two mypy findings.
+- Rewrote `tox.ini`, which referenced a missing `dev-requirements.txt` and
+  test directories: `tox` now runs the suite on Python 3.11–3.13 from the
+  `[dev]` extra, and `tox -e unit` runs the unit tests.
+- Removed unused imports from the test suite; `.gitignore` now covers the
+  test server's `dbt.db` and JetBrains `.idea/`.
+
+### CI
+- Tests now run on Python 3.11, 3.12 and 3.13 in a matrix job; building and
+  publishing only proceed once every Python version passes.
+
+### Test suite
+- Added functional tests that run table, view, Python, incremental and seed
+  models against a DuckLake catalog attached to the test server, including
+  reruns that replace existing relations, and a contracted model using every
+  constraint type plus an index.
+- Added tests for typed empty results: an incremental Python model whose first
+  load is empty, an empty seed with `column_types` (seeded twice), column
+  types of empty record batch streams, and unit tests for the Arrow → DuckDB
+  column-definition mapping.
+
 ## v1.12.4 (2026-09-30)
 
 ### Features
