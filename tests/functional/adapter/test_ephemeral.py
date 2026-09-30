@@ -1,7 +1,6 @@
 import os
 import re
 
-import pytest
 
 from dbt.tests.adapter.ephemeral.test_ephemeral import (
     BaseEphemeralErrorHandling,

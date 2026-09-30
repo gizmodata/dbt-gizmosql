@@ -128,3 +128,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# GizmoSQL test server database (created by tests/conftest.py)
+dbt.db
+dbt.db.wal
+
+# JetBrains IDEs
+.idea/

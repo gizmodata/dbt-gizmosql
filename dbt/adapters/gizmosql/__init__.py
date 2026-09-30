@@ -8,7 +8,7 @@ from dbt.include import gizmosql
 __version__ = "1.12.4"
 
 Plugin = AdapterPlugin(
-    adapter=GizmoSQLAdapter,
+    adapter=GizmoSQLAdapter,  # type: ignore[arg-type]
     credentials=GizmoSQLCredentials,
-    include_path=gizmosql.PACKAGE_PATH
+    include_path=gizmosql.PACKAGE_PATH,
 )

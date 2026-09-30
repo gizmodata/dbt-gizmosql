@@ -17,8 +17,8 @@ dbt-gizmosql is a [dbt](https://www.getdbt.com/) adapter for [GizmoSQL](https://
    2. `dbt/adapters/gizmosql/__init__.py` — `__version__ = "x.y.z"`
    3. `dbt/adapters/gizmosql/__version__.py` — `version = "x.y.z"`
    4. `dbt/include/gizmosql/dbt_project.yml` — `version: x.y.z`
-   5. `CHANGELOG.md` — **add a new `## vx.y.z (YYYY-MM-DD)` section at the top** describing user-visible changes. Group under `### Features`, `### Bug fixes`, `### Changes`, `### Dependency updates`, `### CI`, `### Test suite` as applicable. Reference issue numbers (`#6`) for bug fixes.
-2. **Run the full test suite** (`pytest tests/`) — it must pass before you tag.
+   5. `CHANGELOG.md` — **add a new `## vx.y.z (YYYY-MM-DD)` section at the top** describing user-visible changes (between releases, changes accumulate under `## Unreleased` — rename that header to the version at release time; CI's release-notes step only matches `## vx.y.z ` headers). Group under `### Features`, `### Bug fixes`, `### Changes`, `### Dependency updates`, `### CI`, `### Test suite` as applicable. Reference issue numbers (`#6`) for bug fixes.
+2. **Run the full test suite** (`pytest tests/`) and `pre-commit run --all-files` — both must pass before you tag.
 3. **Commit** — prefer a feature commit + a separate `Bump version to vx.y.z` commit (matching the existing git history pattern).
 4. **Push master** — `git push origin master`.
 5. **Tag and push the tag** — `git tag vx.y.z && git push origin vx.y.z`. The CI workflow is triggered by `v*` tag pushes and will build, publish to PyPI, and create the GitHub Release.
@@ -28,19 +28,24 @@ Version tracks dbt-core (e.g., dbt-core 1.11.x → dbt-gizmosql 1.11.x).
 
 ## CI/CD
 - **Workflow**: `.github/workflows/ci.yml`
-- **Trigger**: Pushes of `v*` tags (and `workflow_dispatch`)
-- **Pipeline**: Install → Test → Build wheel/sdist → Publish to PyPI → Create GitHub Release
+- **Trigger**: Every push (and `workflow_dispatch`) runs the tests; pushes of `v*` tags also publish
+- **Pipeline**: `test` job (Python 3.11 / 3.12 / 3.13 matrix) → `build-n-publish` job (needs `test`): Build wheel/sdist → Publish to PyPI → Create GitHub Release (the last two on tags only)
 - **PyPI publishing**: Uses trusted publishing (`id-token: write`)
-- **GitHub releases**: Uses `softprops/action-gh-release@v2` with auto-generated release notes
+- **GitHub releases**: Uses `softprops/action-gh-release@v3`; the body is the tag's `CHANGELOG.md` section followed by auto-generated release notes, with `dist/*` attached
+- **Python versions**: `requires-python = ">=3.11"` (pandas 3 needs it); keep the CI matrix, classifiers and `tox.ini` envlist in sync
 
 ## Testing
 - The GizmoSQL test server is started as a subprocess by `tests/conftest.py`
   via the [`gizmosql`](https://pypi.org/project/gizmosql/) package — no Docker
   needed for the server itself. The package auto-picks a free port.
-- `tests/functional/adapter/test_external.py` still uses Docker for a MinIO
-  sidecar (bound to `localhost:9000`) to exercise S3 writes; ensure Docker
-  is running and port 9000 is free if you run that file.
-- Run: `pytest tests/`
+- `tests/functional/adapter/test_external.py` still uses Docker for an
+  S3-compatible sidecar (the Versity S3 Gateway, `versity/versitygw` — MinIO
+  images are no longer pullable) bound to `localhost:9000` to exercise S3
+  writes; ensure Docker is running and port 9000 is free if you run that file.
+- `tests/functional/adapter/test_ducklake.py` attaches a local DuckLake
+  catalog to the test server (the `ducklake` extension is auto-installed).
+- `tests/unit/` needs no server.
+- Run: `pytest tests/` (or `tox` for the 3.11–3.13 matrix). Lint: `pre-commit run --all-files`.
 
 ## Dependencies (main)
 - `dbt-core`, `dbt-common`, `dbt-adapters` — use `~=` (compatible release) pinning

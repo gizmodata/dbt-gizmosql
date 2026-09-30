@@ -1,5 +1,3 @@
-import pytest
-
 from dbt.tests.adapter.hooks.test_model_hooks import (
     BasePrePostModelHooksOnSeeds,
     BaseHooksRefsOnSeeds,

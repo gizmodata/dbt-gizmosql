@@ -10,7 +10,6 @@ All I/O runs server-side on the GizmoSQL container: the adapter writes files
 to the container's /tmp (and, in the S3 class, to an s3:// URI backed by a
 S3 gateway sidecar) and we verify the round-trip entirely through GizmoSQL queries.
 """
-import os
 import time
 import urllib.request
 from pathlib import Path

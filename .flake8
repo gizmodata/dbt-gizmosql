@@ -3,10 +3,16 @@ select =
     E
     W
     F
+# W503 and E203 are ignored so Flake8 agrees with black's formatting.
+# (flake8 >= 6 no longer allows inline comments in option values.)
 ignore =
-    W503 # makes Flake8 work like black
+    W503
     W504
-    E203 # makes Flake8 work like black
+    E203
     E741
     E501
-exclude = tests
+exclude =
+    tests
+    .venv
+    build
+    dist

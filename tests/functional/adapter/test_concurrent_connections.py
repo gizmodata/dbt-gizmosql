@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
 
-from dbt.adapters.contracts.connection import Connection, ConnectionState
+from dbt.adapters.contracts.connection import Connection
 from dbt.adapters.gizmosql.connections import GizmoSQLConnectionManager, GizmoSQLCredentials
 
 

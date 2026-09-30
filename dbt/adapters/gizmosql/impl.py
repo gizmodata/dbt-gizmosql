@@ -124,6 +124,26 @@ class _DuckDBDataFrame:
         return repr(self._rel)
 
 
+def duckdb_column_definitions(schema: pa.Schema) -> str:
+    """Render an Arrow schema as DuckDB column definitions for CREATE TABLE,
+    e.g. `"id" BIGINT, "amount" DECIMAL(12,2), "tags" VARCHAR[]`.
+
+    Used to create a table for an empty result, which ADBC bulk ingest can't
+    do ("Stream finished before first message sent"). An in-process DuckDB
+    maps the Arrow types, so the table gets exactly the column types a
+    non-empty ingest would have created.
+    """
+    local_db = duckdb.connect(database=":memory:")
+    try:
+        relation = local_db.from_arrow(schema.empty_table())
+        return ", ".join(
+            '"{}" {}'.format(name.replace('"', '""'), data_type)
+            for name, data_type in zip(relation.columns, relation.types)
+        )
+    finally:
+        local_db.close()
+
+
 _CLOSED_STREAM_MESSAGE = """\
 Python model returned a record batch stream that was already closed.
 
@@ -326,6 +346,38 @@ class GizmoSQLAdapter(adapter_cls):
             return ".".join(["/".join(globs), str(rendered_options.get("format", "parquet"))])
         return write_location
 
+    @available.parse(lambda *a, **k: None)
+    def get_catalog_type(self, database: Optional[str]) -> Optional[str]:
+        """Return the DuckDB catalog type of `database` — e.g. 'duckdb' or
+        'ducklake' — from the server's `duckdb_databases()`, or None if it
+        can't be determined (e.g. a SQLite back-end). An empty `database`
+        means the connection's current catalog. Cached per database.
+        """
+        cache: Dict[str, Optional[str]] = self.__dict__.setdefault("_catalog_types", {})
+        key = (database or "").lower()
+        if key in cache:
+            return cache[key]
+
+        if database:
+            sql = "SELECT type FROM duckdb_databases() WHERE lower(database_name) = lower(?)"
+            parameters = [database]
+        else:
+            sql = "SELECT type FROM duckdb_databases() WHERE database_name = current_database()"
+            parameters = None
+        try:
+            connection = self.connections.get_thread_connection()
+            cursor = connection.handle.cursor()
+            try:
+                cursor.execute(operation=sql, parameters=parameters)
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
+            catalog_type = row[0].lower() if row else None
+        except Exception:
+            catalog_type = None
+        cache[key] = catalog_type
+        return catalog_type
+
     @available
     def location_exists(self, location: str) -> bool:
         """Probe whether a file/path is readable by the GizmoSQL server."""
@@ -369,11 +421,61 @@ class GizmoSQLAdapter(adapter_cls):
         from dbt.adapters.events.logging import AdapterLogger
 
         if not hasattr(self, "_warned_messages"):
-            self._warned_messages = set()
+            self._warned_messages: set[str] = set()
         if msg in self._warned_messages:
             return
         self._warned_messages.add(msg)
         AdapterLogger("GizmoSQL").warning(msg)
+
+    # DuckLake supports (and enforces) only NOT NULL; PRIMARY KEY, UNIQUE,
+    # CHECK and FOREIGN KEY fail at CREATE TABLE. `custom` constraints are
+    # user-written DDL and are passed through as-is.
+    DUCKLAKE_SUPPORTED_CONSTRAINTS = frozenset(
+        {ConstraintType.not_null.value, ConstraintType.custom.value}
+    )
+
+    @available
+    def ducklake_supported_constraints(
+        self,
+        raw_columns: Dict[str, Dict[str, Any]],
+        raw_constraints: List[Dict[str, Any]],
+        model_name: str,
+    ) -> Dict[str, Any]:
+        """Return copies of a model's column and model-level constraints
+        without those a DuckLake catalog can't create, warning once for each
+        one skipped (unless the constraint sets `warn_unsupported: false`) —
+        the same warn-and-skip treatment dbt gives any constraint an adapter
+        doesn't support.
+        """
+
+        def supported(constraint: Dict[str, Any], location: str) -> bool:
+            constraint_type = str(constraint.get("type"))
+            if constraint_type in self.DUCKLAKE_SUPPORTED_CONSTRAINTS:
+                return True
+            if constraint.get("warn_unsupported", True):
+                self.warn_once(
+                    msg=f"Model {model_name}: skipping the {constraint_type} constraint "
+                    f"on {location} — DuckLake catalogs only support NOT NULL constraints."
+                )
+            return False
+
+        columns = {
+            key: {
+                **column,
+                "constraints": [
+                    c
+                    for c in column.get("constraints") or []
+                    if supported(constraint=c, location=f"column {column['name']}")
+                ],
+            }
+            for key, column in raw_columns.items()
+        }
+        constraints = [
+            c
+            for c in raw_constraints
+            if supported(constraint=c, location=f"columns {', '.join(c.get('columns') or [])}")
+        ]
+        return {"columns": columns, "constraints": constraints}
 
     @classmethod
     def render_column_constraint(cls, constraint) -> Optional[str]:
@@ -396,7 +498,12 @@ class GizmoSQLAdapter(adapter_cls):
     def render_model_constraint(cls, constraint) -> Optional[str]:
         """Override to strip database prefix from FK references."""
         rendered = super().render_model_constraint(constraint)
-        if rendered and hasattr(constraint, "to") and constraint.to and constraint.type.value == "foreign_key":
+        if (
+            rendered
+            and hasattr(constraint, "to")
+            and constraint.to
+            and constraint.type.value == "foreign_key"
+        ):
             parts = constraint.to.split(".")
             if len(parts) == 3:
                 schema_table = ".".join(parts[1:])
@@ -432,31 +539,22 @@ class GizmoSQLAdapter(adapter_cls):
         finally:
             local_db.close()
 
-        # Handle empty CSV (header only, no data rows)
-        if arrow_table.num_rows == 0:
-            # Create table from schema, insert nothing
-            connection = self.connections.get_thread_connection()
-            col_defs = ", ".join(
-                f'"{f.name}" {self._arrow_to_duckdb_type(f.type)}'
-                for f in arrow_table.schema
-            )
-            cursor = connection.handle.cursor()
-            try:
-                cursor.execute(
-                    f'CREATE TABLE "{db_schema}"."{table_name}" ({col_defs})'
-                )
-            finally:
-                cursor.close()
-            return 0
-
         # Apply column_types overrides from dbt config if specified
         if column_types:
             type_map = {
-                "text": pa.string(), "varchar": pa.string(), "string": pa.string(),
-                "integer": pa.int32(), "int": pa.int32(), "bigint": pa.int64(),
-                "float": pa.float64(), "double": pa.float64(), "numeric": pa.float64(),
-                "boolean": pa.bool_(), "bool": pa.bool_(),
-                "date": pa.date32(), "timestamp": pa.timestamp("us"),
+                "text": pa.string(),
+                "varchar": pa.string(),
+                "string": pa.string(),
+                "integer": pa.int32(),
+                "int": pa.int32(),
+                "bigint": pa.int64(),
+                "float": pa.float64(),
+                "double": pa.float64(),
+                "numeric": pa.float64(),
+                "boolean": pa.bool_(),
+                "bool": pa.bool_(),
+                "date": pa.date32(),
+                "timestamp": pa.timestamp("us"),
             }
             new_fields = []
             for field in arrow_table.schema:
@@ -467,6 +565,18 @@ class GizmoSQLAdapter(adapter_cls):
                     new_fields.append(field)
             new_schema = pa.schema(new_fields)
             arrow_table = arrow_table.cast(new_schema)
+
+        # Handle empty CSV (header only, no data rows): ADBC ingest can't
+        # create a table from zero rows, so create it from the schema
+        if arrow_table.num_rows == 0:
+            col_defs = duckdb_column_definitions(schema=arrow_table.schema)
+            connection = self.connections.get_thread_connection()
+            cursor = connection.handle.cursor()
+            try:
+                cursor.execute(f'CREATE TABLE "{db_schema}"."{table_name}" ({col_defs})')
+            finally:
+                cursor.close()
+            return 0
 
         # Bulk ingest via ADBC — creates the table with Arrow-inferred types
         connection = self.connections.get_thread_connection()
@@ -482,25 +592,6 @@ class GizmoSQLAdapter(adapter_cls):
             cursor.close()
 
         return rows
-
-    @staticmethod
-    def _arrow_to_duckdb_type(arrow_type) -> str:
-        """Map Arrow types to DuckDB SQL type names."""
-        if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
-            return "VARCHAR"
-        if pa.types.is_int32(arrow_type):
-            return "INTEGER"
-        if pa.types.is_int64(arrow_type):
-            return "BIGINT"
-        if pa.types.is_float64(arrow_type):
-            return "DOUBLE"
-        if pa.types.is_boolean(arrow_type):
-            return "BOOLEAN"
-        if pa.types.is_date(arrow_type):
-            return "DATE"
-        if pa.types.is_timestamp(arrow_type):
-            return "TIMESTAMP"
-        return "VARCHAR"
 
     def submit_python_job(self, parsed_model: dict, compiled_code: str) -> AdapterResponse:
         """Execute a Python model client-side using local DuckDB.
@@ -527,7 +618,7 @@ class GizmoSQLAdapter(adapter_cls):
                 arrow_table = cursor.fetch_arrow_table()
             finally:
                 cursor.close()
-            clean_name = table_name.replace('"', '')
+            clean_name = table_name.replace('"', "")
             local_db.register(clean_name, arrow_table)
             return _DuckDBDataFrame(local_db.query(f"SELECT * FROM '{clean_name}'"))
 

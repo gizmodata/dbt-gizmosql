@@ -130,6 +130,13 @@ Seeds are loaded using DuckDB's CSV reader on the client side with ADBC bulk ing
 ### Constraints
 All constraint types are enforced: `CHECK`, `NOT NULL`, `UNIQUE`, `PRIMARY KEY`, `FOREIGN KEY`.
 
+### DuckLake catalogs
+Models can target a [DuckLake](https://ducklake.select/) catalog attached to the GizmoSQL server (set `database` to the catalog name). The adapter detects DuckLake catalogs via `duckdb_databases()` and works around what DuckLake doesn't support:
+
+- Existing tables/views are replaced without `DROP ... CASCADE`.
+- Only `NOT NULL` contract constraints are created (and enforced); `PRIMARY KEY`, `UNIQUE`, `CHECK` and `FOREIGN KEY` constraints are skipped with a warning (silence it per constraint with `warn_unsupported: false`), so a shared `schema.yml` still builds.
+- The `indexes` config is skipped with a warning.
+
 ### Documentation
 - `persist_docs` support (`COMMENT ON` for relations and columns)
 - Full catalog generation with `dbt docs generate`
@@ -199,6 +206,8 @@ select * from {{ ref('fact_events') }}
 - dbt-duckdb's `plugin` / `glue_register` options are **not** supported: those are a client-side feature of dbt-duckdb with no analogue on the server. Setting either will produce a clear compile-time error.
 
 ## Installation
+
+Requires Python 3.11 or newer (tested on 3.11, 3.12 and 3.13).
 
 ### Option 1 - from PyPi
 ```shell

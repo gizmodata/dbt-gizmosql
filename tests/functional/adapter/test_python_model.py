@@ -236,15 +236,15 @@ class TestPythonRecordBatches:
         ]
 
         for name, expected_columns in (
-            ("empty_reader", ["id", "name"]),
-            ("zero_row_batches", ["id"]),
+            ("empty_reader", [("id", "BIGINT"), ("name", "VARCHAR")]),
+            ("zero_row_batches", [("id", "BIGINT")]),
         ):
             empty = relation_from_name(adapter=project.adapter, name=name)
             count = project.run_sql(sql=f"select count(*) from {empty}", fetch="one")
             assert count[0] == 0, name
             with get_connection(adapter=project.adapter):
                 columns = project.adapter.get_columns_in_relation(relation=empty)
-            assert [c.name for c in columns] == expected_columns, name
+            assert [(c.name, c.dtype.upper()) for c in columns] == expected_columns, name
 
 
 INCREMENTAL_UPSTREAM_SQL = """

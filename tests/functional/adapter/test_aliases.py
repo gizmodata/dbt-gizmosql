@@ -1,5 +1,3 @@
-import pytest
-
 from dbt.tests.adapter.aliases.test_aliases import (
     BaseAliases,
     BaseAliasErrors,

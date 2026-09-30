@@ -1,5 +1,6 @@
 from dbt.adapters.base.relation import BaseRelation, Policy
 
+
 class GizmoSQLIncludePolicy(Policy):
     database: bool = True
     schema: bool = True

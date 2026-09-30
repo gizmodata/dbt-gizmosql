@@ -119,10 +119,10 @@ def materialize(df, con):
     try:
         cursor.execute('DROP TABLE IF EXISTS {{ relation }}')
         if isinstance(arrow_data, pa.Table) and arrow_data.num_rows == 0:
-            # ADBC ingest fails on empty tables; create from schema
-            col_defs = ', '.join(
-                f'"{f.name}" VARCHAR' for f in arrow_data.schema
-            )
+            # ADBC ingest fails on empty tables; create from schema with the
+            # column types a non-empty ingest would have produced
+            from dbt.adapters.gizmosql.impl import duckdb_column_definitions
+            col_defs = duckdb_column_definitions(schema=arrow_data.schema)
             if schema_name:
                 cursor.execute(f'CREATE TABLE "{schema_name}"."{{ relation.identifier }}" ({col_defs})')
             else:
@@ -194,10 +194,45 @@ def materialize(df, con):
 {% endmacro %}
 
 {% macro gizmosql__drop_relation(relation) -%}
+  {#-- DuckLake doesn't support DROP TABLE/VIEW ... CASCADE ("Cascade Drop not
+       supported in DuckLake"), so omit it for relations in a DuckLake catalog --#}
+  {%- set cascade = adapter.get_catalog_type(relation.database) != 'ducklake' -%}
   {% call statement('drop_relation', auto_begin=False) -%}
-    drop {{ relation.type }} if exists {{ relation }} cascade
+    drop {{ relation.type }} if exists {{ relation }}{% if cascade %} cascade{% endif %}
   {%- endcall %}
 {% endmacro %}
+
+{#-- Contract constraints: DuckLake supports only NOT NULL, so in a DuckLake
+     catalog the others are skipped with a warning (see
+     GizmoSQLAdapter.ducklake_supported_constraints); elsewhere dbt's default. --#}
+{% macro gizmosql__get_table_columns_and_constraints() -%}
+  {%- if adapter.get_catalog_type(model['database']) != 'ducklake' -%}
+    {{ return(table_columns_and_constraints()) }}
+  {%- endif -%}
+  {%- set supported = adapter.ducklake_supported_constraints(
+        raw_columns=model['columns'],
+        raw_constraints=model['constraints'],
+        model_name=model['name']) -%}
+  {%- set raw_column_constraints = adapter.render_raw_columns_constraints(raw_columns=supported['columns']) -%}
+  {%- set raw_model_constraints = adapter.render_raw_model_constraints(raw_constraints=supported['constraints']) -%}
+    (
+    {% for c in raw_column_constraints -%}
+      {{ c }}{{ "," if not loop.last or raw_model_constraints }}
+    {% endfor %}
+    {% for c in raw_model_constraints -%}
+        {{ c }}{{ "," if not loop.last }}
+    {% endfor -%}
+    )
+{%- endmacro %}
+
+{#-- DuckLake doesn't support indexes; skip `indexes` config there with a warning --#}
+{% macro gizmosql__create_indexes(relation) -%}
+  {%- if config.get('indexes', default=[]) and adapter.get_catalog_type(relation.database) == 'ducklake' -%}
+    {% do adapter.warn_once(msg="Model " ~ model['name'] ~ ": skipping the `indexes` config — DuckLake catalogs don't support indexes.") %}
+  {%- else -%}
+    {{ default__create_indexes(relation) }}
+  {%- endif -%}
+{%- endmacro %}
 
 {% macro gizmosql__rename_relation(from_relation, to_relation) -%}
   {% set target_name = adapter.quote_as_configured(to_relation.identifier, 'identifier') %}
@@ -368,9 +403,29 @@ def materialize(df, con):
 {% endmacro %}
 
 {#-- Seed loading: use DuckDB client-side for CSV parsing, then ADBC bulk ingest --#}
+{% macro gizmosql__load_seed_csv(model) %}
+  {#-- Build the CSV file path (mirrors dbt's load_agate_table logic) --#}
+  {% set csv_path = model['root_path'] ~ '/' ~ model['original_file_path'] %}
+
+  {#-- Use DuckDB (client-side) to read CSV with proper type inference,
+       then ADBC bulk ingest to GizmoSQL server --#}
+  {% do adapter.load_seed_from_csv(
+    table_name=this.identifier,
+    csv_file_path=csv_path,
+    db_schema=this.schema,
+    column_types=model['config'].get('column_types', {}),
+    delimiter=model['config'].get('delimiter', none)
+  ) %}
+{% endmacro %}
+
 {% macro gizmosql__create_csv_table(model, agate_table) %}
-  {#-- No-op: table will be created by ADBC ingest in load_csv_rows.
-       Run a trivial statement to ensure a connection is open. --#}
+  {#-- The table is normally created by ADBC ingest in load_csv_rows. dbt
+       skips load_csv_rows for a seed with no rows, though, so create the
+       (empty, typed) table here in that case. --#}
+  {% if agate_table.rows | length == 0 %}
+    {% do gizmosql__load_seed_csv(model) %}
+  {% endif %}
+  {#-- Run a trivial statement to ensure a connection is open. --#}
   {%- call statement('create_csv_table') -%}
     select 1
   {%- endcall -%}
@@ -380,28 +435,11 @@ def materialize(df, con):
 {% macro gizmosql__reset_csv_table(model, full_refresh, old_relation, agate_table) %}
   {#-- Always drop so ADBC ingest can recreate with correct types --#}
   {{ adapter.drop_relation(old_relation) }}
-  {%- call statement('reset_csv_table') -%}
-    select 1
-  {%- endcall -%}
-  {{ return("") }}
+  {{ return(gizmosql__create_csv_table(model, agate_table)) }}
 {% endmacro %}
 
 {% macro gizmosql__load_csv_rows(model, agate_table) %}
-  {#-- Build the CSV file path (mirrors dbt's load_agate_table logic) --#}
-  {% set csv_path = model['root_path'] ~ '/' ~ model['original_file_path'] %}
-  {% set column_types = model['config'].get('column_types', {}) %}
-  {% set delimiter = model['config'].get('delimiter', none) %}
-
-  {#-- Use DuckDB (client-side) to read CSV with proper type inference,
-       then ADBC bulk ingest to GizmoSQL server --#}
-  {% do adapter.load_seed_from_csv(
-    this.identifier,
-    csv_path,
-    this.schema,
-    column_types,
-    delimiter
-  ) %}
-
+  {% do gizmosql__load_seed_csv(model) %}
   {{ return("-- seed loaded via DuckDB CSV reader + ADBC bulk ingest") }}
 {% endmacro %}
 

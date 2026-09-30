@@ -55,7 +55,9 @@ class GizmoSQLCredentials(Credentials):
             connect_kwargs = {
                 "uri": f"grpc{tls_string}://{self.host}:{self.port}",
                 "tls_skip_verify": self.tls_skip_verify,
-                "conn_kwargs": {"adbc.connection.catalog": self.database} if self.database else None,
+                "conn_kwargs": (
+                    {"adbc.connection.catalog": self.database} if self.database else None
+                ),
                 "autocommit": False,
             }
             if self.auth_type:
@@ -116,7 +118,11 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             connect_kwargs = {
                 "uri": f"grpc{tls_string}://{credentials.host}:{credentials.port}",
                 "tls_skip_verify": credentials.tls_skip_verify,
-                "conn_kwargs": {"adbc.connection.catalog": credentials.database} if credentials.database else None,
+                "conn_kwargs": (
+                    {"adbc.connection.catalog": credentials.database}
+                    if credentials.database
+                    else None
+                ),
                 "autocommit": True,
             }
             if credentials.auth_type:
