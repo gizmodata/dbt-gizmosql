@@ -42,9 +42,39 @@ def model(dbt, session):
     return df
 ```
 
-- Supports DuckDB relations, pandas DataFrames, and PyArrow Tables as return types
+- Supports DuckDB relations, pandas DataFrames, PyArrow Tables, and PyArrow record batches as return types (see below)
 - `dbt.ref()` and `dbt.source()` fetch data from GizmoSQL as Arrow and expose it as DuckDB relations
 - Incremental Python models supported (with proper `dbt.is_incremental` handling)
+
+#### Streaming record batches
+
+In addition to full `pyarrow.Table`s, a Python model can return Arrow record batches:
+
+- a single `pyarrow.RecordBatch`
+- a `pyarrow.RecordBatchReader`
+- a list or generator of `pyarrow.RecordBatch`es
+- any object implementing the [Arrow PyCapsule stream protocol](https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html) (`__arrow_c_stream__`, e.g. a polars DataFrame)
+
+Readers, generators, and stream-protocol objects are **streamed** to GizmoSQL through ADBC bulk ingest batch by batch, so the full result never has to be collected into a single table in client memory:
+
+```python
+import pyarrow as pa
+
+def model(dbt, session):
+    dbt.config(materialized="table")
+    schema = pa.schema(fields=[("id", pa.int64()), ("name", pa.string())])
+
+    def batches():
+        for start in (0, 1000, 2000):
+            ids = list(range(start, start + 1000))
+            yield pa.record_batch(
+                data={"id": ids, "name": [f"n{i}" for i in ids]}, schema=schema
+            )
+
+    return pa.RecordBatchReader.from_batches(schema=schema, batches=batches())
+```
+
+dbt requires `model()` itself to `return` exactly once, so put any `yield`s in an inner function and return its generator (returning `batches()` directly works too). A stream with no rows still creates the (empty) table, but an empty generator or list has no schema to create it from — return an empty `RecordBatchReader` or `Table` with an explicit schema instead.
 
 #### Server-side pushdown with `session.remote_sql()`
 

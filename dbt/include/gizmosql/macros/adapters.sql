@@ -92,17 +92,23 @@
 {{ compiled_code }}
 
 def materialize(df, con):
-    """Ship Arrow data to GizmoSQL via ADBC bulk ingest."""
+    """Ship Arrow data to GizmoSQL via ADBC bulk ingest.
+
+    A RecordBatchReader is streamed to the server batch by batch; the caller
+    guarantees it is non-empty (empty streams arrive as an empty Table).
+    """
     import pyarrow as pa
     import pandas as _pd
 
-    # Convert to Arrow table if needed
-    if isinstance(df, pa.Table):
-        arrow_table = df
+    # Convert to Arrow if needed
+    if isinstance(df, (pa.Table, pa.RecordBatchReader)):
+        arrow_data = df
+    elif isinstance(df, pa.RecordBatch):
+        arrow_data = pa.Table.from_batches(batches=[df])
     elif isinstance(df, _pd.DataFrame):
-        arrow_table = pa.Table.from_pandas(df, preserve_index=False)
+        arrow_data = pa.Table.from_pandas(df=df, preserve_index=False)
     elif hasattr(df, 'to_arrow_table'):
-        arrow_table = df.to_arrow_table()
+        arrow_data = df.to_arrow_table()
     else:
         raise ValueError(f"Cannot materialize type {type(df)}")
 
@@ -112,10 +118,10 @@ def materialize(df, con):
     cursor = con.cursor()
     try:
         cursor.execute('DROP TABLE IF EXISTS {{ relation }}')
-        if arrow_table.num_rows == 0:
+        if isinstance(arrow_data, pa.Table) and arrow_data.num_rows == 0:
             # ADBC ingest fails on empty tables; create from schema
             col_defs = ', '.join(
-                f'"{f.name}" VARCHAR' for f in arrow_table.schema
+                f'"{f.name}" VARCHAR' for f in arrow_data.schema
             )
             if schema_name:
                 cursor.execute(f'CREATE TABLE "{schema_name}"."{{ relation.identifier }}" ({col_defs})')
@@ -123,8 +129,8 @@ def materialize(df, con):
                 cursor.execute(f'CREATE TABLE "{{ relation.identifier }}" ({col_defs})')
         else:
             cursor.adbc_ingest(
-                '{{ relation.identifier }}',
-                arrow_table,
+                table_name='{{ relation.identifier }}',
+                data=arrow_data,
                 mode='create',
                 db_schema_name=schema_name,
             )

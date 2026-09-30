@@ -1,8 +1,10 @@
 import importlib.util
+import itertools
 import os
 import tempfile
 import traceback
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Iterable
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import duckdb
 import pyarrow as pa
@@ -120,6 +122,68 @@ class _DuckDBDataFrame:
 
     def __repr__(self):
         return repr(self._rel)
+
+
+def _nonempty_stream_or_empty_table(
+    schema: pa.Schema, batches: Iterable[pa.RecordBatch]
+) -> Union[pa.Table, pa.RecordBatchReader]:
+    """Return a reader over `batches`, or an empty table if they hold no rows.
+
+    Peeks past leading zero-row batches so an empty stream is detected
+    without materializing the non-empty case — ADBC bulk ingest can't
+    create a table from an empty stream, so callers create it from the
+    schema instead.
+    """
+    batches = iter(batches)
+    for batch in batches:
+        if batch.num_rows:
+            return pa.RecordBatchReader.from_batches(
+                schema=schema, batches=itertools.chain([batch], batches)
+            )
+    return schema.empty_table()
+
+
+def _to_arrow_data(df: Any) -> Union[pa.Table, pa.RecordBatchReader]:
+    """Normalize a Python model's return value to Arrow data for bulk ingest.
+
+    DuckDB relations, pandas DataFrames, `pa.Table`s and single
+    `pa.RecordBatch`es become a `pa.Table`. Record batch streams — a
+    `pa.RecordBatchReader`, any object implementing the Arrow PyCapsule
+    stream protocol (`__arrow_c_stream__`, e.g. a polars DataFrame), or an
+    iterable/generator of `pa.RecordBatch`es — become a
+    `pa.RecordBatchReader`, so ADBC ingest streams them to GizmoSQL batch
+    by batch without collecting the whole result in client memory.
+    """
+    import pandas as pd
+
+    if isinstance(df, (_DuckDBDataFrame, duckdb.DuckDBPyRelation)):
+        return df.to_arrow_table()
+    if isinstance(df, pa.Table):
+        return df
+    if isinstance(df, pa.RecordBatch):
+        return pa.Table.from_batches(batches=[df])
+    if isinstance(df, pd.DataFrame):
+        return pa.Table.from_pandas(df=df, preserve_index=False)
+    if isinstance(df, pa.RecordBatchReader):
+        return _nonempty_stream_or_empty_table(schema=df.schema, batches=df)
+    if hasattr(df, "__arrow_c_stream__"):
+        reader = pa.RecordBatchReader.from_stream(data=df)
+        return _nonempty_stream_or_empty_table(schema=reader.schema, batches=reader)
+    if isinstance(df, Iterable) and not isinstance(df, (str, bytes)):
+        batches = iter(df)
+        first = next(batches, None)
+        if not isinstance(first, pa.RecordBatch):
+            raise DbtRuntimeError(
+                msg="Python model returned an iterable whose first item is "
+                f"{type(first).__name__}, expected pyarrow.RecordBatch. An "
+                "empty iterable has no schema to create the table from — "
+                "return an empty pyarrow.Table or RecordBatchReader instead."
+            )
+        return _nonempty_stream_or_empty_table(
+            schema=first.schema, batches=itertools.chain([first], batches)
+        )
+    # Anything else pandas-convertible
+    return pa.Table.from_pandas(df=df, preserve_index=False)
 
 
 class GizmoSQLAdapter(adapter_cls):
@@ -428,19 +492,12 @@ class GizmoSQLAdapter(adapter_cls):
             session = _GizmoSQLSession(local_db, adbc_conn)
             df = module.model(dbt_obj, session)
 
-            # Materialize: convert result to Arrow and ship to GizmoSQL
-            if isinstance(df, _DuckDBDataFrame):
-                arrow_table = df.to_arrow_table()
-            elif isinstance(df, duckdb.DuckDBPyRelation):
-                arrow_table = df.to_arrow_table()
-            elif isinstance(df, pa.Table):
-                arrow_table = df
-            else:
-                # pandas DataFrame or anything Arrow-convertible
-                arrow_table = pa.Table.from_pandas(df, preserve_index=False)
+            # Materialize: convert result to Arrow (a table, or a record
+            # batch stream) and ship to GizmoSQL
+            arrow_data = _to_arrow_data(df=df)
 
             # Call materialize from compiled code (handles CREATE TABLE)
-            module.materialize(arrow_table, adbc_conn)
+            module.materialize(df=arrow_data, con=adbc_conn)
 
         except DbtRuntimeError:
             raise
