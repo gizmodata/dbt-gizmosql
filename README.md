@@ -76,6 +76,33 @@ def model(dbt, session):
 
 dbt requires `model()` itself to `return` exactly once, so put any `yield`s in an inner function and return its generator (returning `batches()` directly works too). A stream with no rows still creates the (empty) table, but an empty generator or list has no schema to create it from — return an empty `RecordBatchReader` or `Table` with an explicit schema instead.
 
+#### Streaming from an external source (ADBC)
+
+A returned reader is streamed *after* `model()` returns, so whatever produces it must still be open then. A reader from an ADBC `cursor.fetch_record_batch()` is closed as soon as its cursor or connection closes — including when a `with` block exits — so **don't `return` it from inside a `with` block** (the model fails with *"returned a record batch stream that was already closed"*). Instead, **`yield`** it: dbt-gizmosql streams the reader to GizmoSQL, then resumes the generator so the `with` block closes the connection. The same works with any ADBC driver (e.g. Db2 via `adbc-driver-db2`):
+
+```python
+import os
+
+from adbc_driver_gizmosql import dbapi as gizmosql
+
+
+def extract(query):
+    with gizmosql.connect(
+        uri="gizmosql://source-host:31337",
+        username=os.environ["SOURCE_USERNAME"],
+        password=os.environ["SOURCE_PASSWORD"],
+    ) as conn, conn.cursor() as cursor:
+        cursor.execute(operation=query)
+        yield cursor.fetch_record_batch()  # `yield`, not `return`
+
+
+def model(dbt, session):
+    dbt.config(materialized="table")
+    return extract(query="select * from sales.orders")
+```
+
+This works for incremental models too, and an empty result (e.g. an incremental run with no new rows) still works — the reader's schema creates the (empty) table. If you'd rather collect the whole result in memory first, `return cursor.fetch_arrow_table()` instead.
+
 #### Server-side pushdown with `session.remote_sql()`
 
 Because Python models run client-side, `dbt.ref('big_table').filter(...)` pulls the **entire** upstream table over the network before filtering locally. When you only need a small slice of a large server-side table, use `session.remote_sql(query)` to push the query down to the GizmoSQL server — the filter/aggregation runs server-side and only the result crosses the wire:

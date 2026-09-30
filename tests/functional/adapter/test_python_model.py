@@ -307,3 +307,110 @@ class TestPythonIncrementalRecordBatches:
             (6, "v2"),
             (7, "v2"),
         ]
+
+
+# ---- Streaming from an external ADBC source (e.g. Db2) ---- #
+
+# Mirrors a real-world model that extracts from Db2 via adbc-driver-db2 in a
+# helper function. Here the "external source" is the test GizmoSQL server,
+# reached over its own ADBC connection.
+PY_SOURCE_CONNECT = """
+from adbc_driver_gizmosql import dbapi as gizmosql
+
+def connect_to_source(dbt):
+    return gizmosql.connect(
+        uri=dbt.config.meta_get("source_uri"),
+        username=dbt.config.meta_get("source_username"),
+        password=dbt.config.meta_get("source_password"),
+    )
+"""
+
+SOURCE_ROWS_SQL = """
+{{ config(materialized='table') }}
+select range::bigint as id from range(1, 6)
+"""
+
+# Anti-pattern: leaving the `with` block closes the cursor and connection, so
+# the returned reader is already closed when dbt-gizmosql streams it.
+PY_CLOSED_SOURCE_READER_MODEL = PY_SOURCE_CONNECT + """
+def extract(dbt):
+    with connect_to_source(dbt=dbt) as conn, conn.cursor() as cursor:
+        cursor.execute(operation=f"select id from {dbt.this.database}.{dbt.this.schema}.source_rows")
+        return cursor.fetch_record_batch()
+
+def model(dbt, session):
+    dbt.config(materialized="table")
+    return extract(dbt=dbt)
+"""
+
+# Fix: `yield` the reader instead of returning it. The source stays open
+# while dbt-gizmosql streams the reader, then the `with` block closes it. An
+# incremental run with no new rows yields a reader with zero batches, whose
+# schema still creates the (empty) temp table.
+PY_INCREMENTAL_SOURCE_MODEL = PY_SOURCE_CONNECT + """
+def extract(dbt):
+    query = f"select id from {dbt.this.database}.{dbt.this.schema}.source_rows"
+    if dbt.is_incremental:
+        query += f" where id > (select max(id) from {dbt.this})"
+    with connect_to_source(dbt=dbt) as conn, conn.cursor() as cursor:
+        cursor.execute(operation=query)
+        yield cursor.fetch_record_batch()
+
+def model(dbt, session):
+    dbt.config(materialized="incremental", incremental_strategy="append")
+    return extract(dbt=dbt)
+"""
+
+
+class TestPythonStreamFromExternalSource:
+    @pytest.fixture(scope="class")
+    def project_config_update(self, gizmosql_server):
+        return {
+            "models": {
+                "+meta": {
+                    "source_uri": f"grpc://{gizmosql_server.host}:{gizmosql_server.port}",
+                    "source_username": gizmosql_server.username,
+                    "source_password": gizmosql_server.password,
+                }
+            }
+        }
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "source_rows.sql": SOURCE_ROWS_SQL,
+            "closed_source_reader.py": PY_CLOSED_SOURCE_READER_MODEL,
+            "incremental_source.py": PY_INCREMENTAL_SOURCE_MODEL,
+        }
+
+    def _ids(self, project):
+        relation = relation_from_name(adapter=project.adapter, name="incremental_source")
+        rows = project.run_sql(sql=f"select id from {relation} order by id", fetch="all")
+        return [row[0] for row in rows]
+
+    def test_yielded_reader_incremental(self, project):
+        # The source isn't a dbt dependency of the model (as with a real Db2
+        # source), so build it first.
+        run_dbt(args=["run", "--select", "source_rows"])
+        results = run_dbt(args=["run", "--select", "incremental_source"])
+        assert results[0].status == "success", results[0].message
+        assert self._ids(project=project) == [1, 2, 3, 4, 5]
+
+        # No new source rows: the reader has zero batches — still succeeds
+        results = run_dbt(args=["run", "--select", "incremental_source"])
+        assert results[0].status == "success", results[0].message
+        assert self._ids(project=project) == [1, 2, 3, 4, 5]
+
+        # New source rows are appended
+        source = relation_from_name(adapter=project.adapter, name="source_rows")
+        project.run_sql(sql=f"insert into {source} (id) values (6), (7)")
+        results = run_dbt(args=["run", "--select", "incremental_source"])
+        assert results[0].status == "success", results[0].message
+        assert self._ids(project=project) == [1, 2, 3, 4, 5, 6, 7]
+
+    def test_closed_reader_gets_actionable_error(self, project):
+        run_dbt(args=["run", "--select", "source_rows"])
+        results = run_dbt(args=["run", "--select", "closed_source_reader"], expect_pass=False)
+        assert results[0].status == "error"
+        assert "record batch stream that was already closed" in results[0].message
+        assert "yield cursor.fetch_record_batch()" in results[0].message

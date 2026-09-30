@@ -3,7 +3,7 @@ import itertools
 import os
 import tempfile
 import traceback
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import duckdb
@@ -124,6 +124,29 @@ class _DuckDBDataFrame:
         return repr(self._rel)
 
 
+_CLOSED_STREAM_MESSAGE = """\
+Python model returned a record batch stream that was already closed.
+
+dbt-gizmosql streams a returned RecordBatchReader to GizmoSQL *after*
+model() returns, so its source must still be open then. A reader from an
+ADBC cursor.fetch_record_batch() is closed as soon as its cursor or
+connection is closed -- including by leaving a `with` block inside model().
+
+Either `yield` the reader from a generator instead of returning it --
+dbt-gizmosql streams it, then resumes the generator so the `with` block
+closes the source:
+
+    def extract():
+        with connect(...) as conn, conn.cursor() as cursor:
+            cursor.execute(operation=query)
+            yield cursor.fetch_record_batch()
+
+    return extract()
+
+or materialize the result before the source closes, e.g. return
+cursor.fetch_arrow_table() instead of cursor.fetch_record_batch()."""
+
+
 def _nonempty_stream_or_empty_table(
     schema: pa.Schema, batches: Iterable[pa.RecordBatch]
 ) -> Union[pa.Table, pa.RecordBatchReader]:
@@ -143,14 +166,44 @@ def _nonempty_stream_or_empty_table(
     return schema.empty_table()
 
 
+def _drain_reader_then_resume(
+    reader: pa.RecordBatchReader, items: Iterator[Any]
+) -> Iterator[pa.RecordBatch]:
+    """Yield `reader`'s batches, then resume the generator that yielded it.
+
+    Supports a model that `yield`s a reader from inside a `with` block
+    holding its source open (e.g. an ADBC connection and cursor): the
+    generator stays suspended — source open — while the reader is streamed,
+    and resuming it afterwards lets the `with` block close the source.
+    """
+    yield from reader
+    if next(items, None) is not None:
+        raise DbtRuntimeError(
+            msg="Python model's generator yielded more than one item after a "
+            "RecordBatchReader; yield exactly one RecordBatchReader."
+        )
+
+
 def _to_arrow_data(df: Any) -> Union[pa.Table, pa.RecordBatchReader]:
+    """Normalize a Python model's return value to Arrow data for bulk ingest,
+    turning Arrow's "stream already closed" error into an actionable one."""
+    try:
+        return _to_arrow_data_unguarded(df=df)
+    except pa.ArrowInvalid as err:
+        if "already been closed" not in str(err):
+            raise
+        raise DbtRuntimeError(msg=_CLOSED_STREAM_MESSAGE) from err
+
+
+def _to_arrow_data_unguarded(df: Any) -> Union[pa.Table, pa.RecordBatchReader]:
     """Normalize a Python model's return value to Arrow data for bulk ingest.
 
     DuckDB relations, pandas DataFrames, `pa.Table`s and single
     `pa.RecordBatch`es become a `pa.Table`. Record batch streams — a
     `pa.RecordBatchReader`, any object implementing the Arrow PyCapsule
     stream protocol (`__arrow_c_stream__`, e.g. a polars DataFrame), or an
-    iterable/generator of `pa.RecordBatch`es — become a
+    iterable/generator of `pa.RecordBatch`es, or a generator yielding a
+    single `pa.RecordBatchReader` — become a
     `pa.RecordBatchReader`, so ADBC ingest streams them to GizmoSQL batch
     by batch without collecting the whole result in client memory.
     """
@@ -170,17 +223,23 @@ def _to_arrow_data(df: Any) -> Union[pa.Table, pa.RecordBatchReader]:
         reader = pa.RecordBatchReader.from_stream(data=df)
         return _nonempty_stream_or_empty_table(schema=reader.schema, batches=reader)
     if isinstance(df, Iterable) and not isinstance(df, (str, bytes)):
-        batches = iter(df)
-        first = next(batches, None)
-        if not isinstance(first, pa.RecordBatch):
-            raise DbtRuntimeError(
-                msg="Python model returned an iterable whose first item is "
-                f"{type(first).__name__}, expected pyarrow.RecordBatch. An "
-                "empty iterable has no schema to create the table from — "
-                "return an empty pyarrow.Table or RecordBatchReader instead."
+        items = iter(df)
+        first = next(items, None)
+        if isinstance(first, pa.RecordBatch):
+            return _nonempty_stream_or_empty_table(
+                schema=first.schema, batches=itertools.chain([first], items)
             )
-        return _nonempty_stream_or_empty_table(
-            schema=first.schema, batches=itertools.chain([first], batches)
+        if isinstance(first, pa.RecordBatchReader):
+            return _nonempty_stream_or_empty_table(
+                schema=first.schema,
+                batches=_drain_reader_then_resume(reader=first, items=items),
+            )
+        raise DbtRuntimeError(
+            msg="Python model returned an iterable whose first item is "
+            f"{type(first).__name__}, expected pyarrow.RecordBatch (or a "
+            "single yielded pyarrow.RecordBatchReader). An empty iterable has "
+            "no schema to create the table from — return an empty "
+            "pyarrow.Table or RecordBatchReader instead."
         )
     # Anything else pandas-convertible
     return pa.Table.from_pandas(df=df, preserve_index=False)

@@ -153,3 +153,82 @@ def test_streams_without_rows_become_empty_tables(make_df):
 def test_invalid_iterables_raise(make_df, type_name):
     with pytest.raises(DbtRuntimeError, match=f"first item is {type_name}, expected pyarrow.RecordBatch"):
         _to_arrow_data(df=make_df())
+
+
+# ---- A stream closed before dbt-gizmosql reads it gets an actionable error ---- #
+
+
+def _closed_reader():
+    """Stand-in for an ADBC `cursor.fetch_record_batch()` reader whose cursor
+    or connection was closed (e.g. by leaving a `with` block) before return."""
+    reader = pa.RecordBatchReader.from_stream(data=pa.table(data={"id": [1, 2]}))
+    reader.close()
+    return reader
+
+
+@pytest.mark.parametrize(
+    "make_df",
+    [
+        pytest.param(_closed_reader, id="reader"),
+        pytest.param(lambda: (batch for batch in _closed_reader()), id="generator"),
+    ],
+)
+def test_closed_streams_raise_actionable_error(make_df):
+    with pytest.raises(DbtRuntimeError, match="record batch stream that was already closed") as exc_info:
+        _to_arrow_data(df=make_df())
+    assert "yield cursor.fetch_record_batch()" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, pa.ArrowInvalid)
+
+
+def test_other_arrow_errors_pass_through():
+    def batches():
+        raise pa.ArrowInvalid("some other problem")
+        yield  # pragma: no cover — makes this a generator
+
+    with pytest.raises(pa.ArrowInvalid, match="some other problem"):
+        _to_arrow_data(df=batches())
+
+
+# ---- A generator may yield one RecordBatchReader while holding its source open ---- #
+
+
+def _source_generator(events, batches):
+    """Mimics `with connect(...) as conn, conn.cursor() as cur: yield cur.fetch_record_batch()`,
+    recording when the "source" is opened and closed."""
+    events.append("open")
+    try:
+        yield pa.RecordBatchReader.from_batches(schema=SCHEMA, batches=batches)
+    finally:
+        events.append("close")
+
+
+def test_yielded_reader_streams_then_closes_source():
+    events = []
+    result = _to_arrow_data(df=_source_generator(events=events, batches=[_batch(ids=[1]), _batch(ids=[2, 3])]))
+    assert isinstance(result, pa.RecordBatchReader)
+    # Source stays open while the reader is streamed...
+    assert events == ["open"]
+    assert result.read_all().column(i="id").to_pylist() == [1, 2, 3]
+    # ...and is closed once every batch has been consumed.
+    assert events == ["open", "close"]
+
+
+def test_yielded_empty_reader_keeps_schema_and_closes_source():
+    """An empty result (e.g. an incremental run with no new rows) has zero
+    batches; the reader's schema still creates the table."""
+    events = []
+    result = _to_arrow_data(df=_source_generator(events=events, batches=[]))
+    assert isinstance(result, pa.Table)
+    assert result.num_rows == 0
+    assert result.schema == SCHEMA
+    assert events == ["open", "close"]
+
+
+def test_yielding_more_than_one_reader_raises():
+    def two_readers():
+        for ids in ([1], [2]):
+            yield pa.RecordBatchReader.from_batches(schema=SCHEMA, batches=[_batch(ids=ids)])
+
+    result = _to_arrow_data(df=two_readers())
+    with pytest.raises(DbtRuntimeError, match="yield exactly one RecordBatchReader"):
+        result.read_all()
