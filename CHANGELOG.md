@@ -1,5 +1,28 @@
 # dbt-gizmosql changelog
 
+## v1.12.4 (2026-09-30)
+
+### Features
+- A Python model can now `yield` a single `pyarrow.RecordBatchReader` from a
+  generator — e.g. `yield cursor.fetch_record_batch()` inside a
+  `with connect(...) as conn, conn.cursor() as cursor:` block. dbt-gizmosql
+  streams the reader to GizmoSQL while the source connection stays open, then
+  resumes the generator so the `with` block closes it. The reader's schema
+  still creates the table when the result is empty (e.g. an incremental run
+  with no new rows).
+
+### Bug fixes
+- Returning an ADBC `cursor.fetch_record_batch()` reader from inside a `with`
+  block (which closes the cursor/connection before dbt-gizmosql streams the
+  reader) failed with a cryptic `ArrowInvalid: Attempt to read from a stream
+  that has already been closed`. It now fails with an error explaining the
+  cause and showing the `yield` pattern (or `fetch_arrow_table()`) as the fix.
+
+### Test suite
+- Added unit and functional tests for closed streams and yielded readers,
+  including an incremental model that streams from an external ADBC source
+  (first load, a run with no new rows, and new rows).
+
 ## v1.12.3 (2026-09-30)
 
 ### Features

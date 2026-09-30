@@ -1,5 +1,5 @@
 name: dbt_gizmosql
-version: 1.12.3
+version: 1.12.4
 config-version: 2
 
 macro-paths: ["macros"]
