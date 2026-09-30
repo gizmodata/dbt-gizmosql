@@ -137,6 +137,8 @@ Models can target a [DuckLake](https://ducklake.select/) catalog attached to the
 - Only `NOT NULL` contract constraints are created (and enforced); `PRIMARY KEY`, `UNIQUE`, `CHECK` and `FOREIGN KEY` constraints are skipped with a warning (silence it per constraint with `warn_unsupported: false`), so a shared `schema.yml` still builds.
 - The `indexes` config is skipped with a warning.
 
+**Long writes and a Postgres metadata catalog.** DuckLake keeps its metadata transaction open — with the Postgres session idle — for the whole of a write. A streamed Python model result (a `RecordBatchReader` or generator) keeps it open for as long as the *source* takes to produce every batch, not just the upload. If the metadata Postgres server has an `idle_in_transaction_session_timeout` shorter than that, the write is killed at commit with `Failed to commit: Failed to execute query "ROLLBACK": ` (the adapter adds a hint explaining this). Raise the timeout for the DuckLake catalog — server-wide (e.g. the RDS parameter group), or per role with `ALTER ROLE <catalog_role> SET idle_in_transaction_session_timeout = '2h'` and a reconnect — or shorten the write by returning `cursor.fetch_arrow_table()` instead of streaming from a slow source.
+
 ### Documentation
 - `persist_docs` support (`COMMENT ON` for relations and columns)
 - Full catalog generation with `dbt docs generate`

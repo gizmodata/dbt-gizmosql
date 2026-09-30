@@ -18,6 +18,7 @@ from dbt_common.contracts.constraints import ConstraintType
 from dbt_common.exceptions import DbtRuntimeError
 
 from dbt.adapters.gizmosql import GizmoSQLConnectionManager
+from dbt.adapters.gizmosql.connections import with_ducklake_metadata_hint
 from dbt.adapters.gizmosql.column import DuckDBColumn
 from dbt.adapters.gizmosql.relation import GizmoSQLRelation
 
@@ -653,7 +654,9 @@ class GizmoSQLAdapter(adapter_cls):
             raise
         except Exception as err:
             raise DbtRuntimeError(
-                f"Python model failed:\n{''.join(traceback.format_exception(err))}"
+                with_ducklake_metadata_hint(
+                    message=f"Python model failed:\n{''.join(traceback.format_exception(err))}"
+                )
             )
         finally:
             os.unlink(mod_file.name)

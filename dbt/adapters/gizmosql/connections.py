@@ -17,6 +17,30 @@ from dbt.adapters.sql import SQLConnectionManager
 logger = AdapterLogger("GizmoSQL")
 
 
+DUCKLAKE_METADATA_TIMEOUT_HINT = """
+
+Hint: this looks like a DuckLake catalog whose Postgres metadata connection was
+closed mid-transaction. DuckLake keeps its metadata transaction open -- and the
+Postgres session idle -- for the whole of a write, so a write that runs longer
+than the metadata server's idle_in_transaction_session_timeout is killed at
+commit. Either raise that timeout for the DuckLake catalog (server/parameter
+group setting, or per role:
+  ALTER ROLE <catalog_role> SET idle_in_transaction_session_timeout = '2h';
+then have GizmoSQL reconnect), or shorten the write -- e.g. have a Python model
+return cursor.fetch_arrow_table() instead of streaming from a slow source."""
+
+
+def with_ducklake_metadata_hint(message: str) -> str:
+    """Append an explanation to errors caused by a DuckLake Postgres metadata
+    connection dying mid-transaction (typically idle_in_transaction_session_timeout),
+    which otherwise surface as e.g. `Failed to commit: Failed to execute query
+    "ROLLBACK": ` with an empty Postgres error."""
+    # The quote may be JSON-escaped (\") when the error is relayed by the server
+    if "Failed to commit" in message and re.search(r'Failed to execute query \\?"', message):
+        return message + DUCKLAKE_METADATA_TIMEOUT_HINT
+    return message
+
+
 @dataclass
 class GizmoSQLCredentials(Credentials):
     database: str = ""
@@ -221,8 +245,12 @@ class GizmoSQLConnectionManager(SQLConnectionManager):
             logger.debug("GizmoSQL error: {}".format(str(e)))
             logger.debug("Error running SQL: {}".format(sql))
             # Preserve original RuntimeError with full context instead of swallowing
-            raise dbt.exceptions.DbtRuntimeError(str(e)) from e
+            raise dbt.exceptions.DbtRuntimeError(
+                with_ducklake_metadata_hint(message=str(e))
+            ) from e
         except Exception as exc:
             logger.debug("Error running SQL: {}".format(sql))
             logger.debug("Rolling back transaction.")
-            raise dbt.exceptions.DbtRuntimeError(str(exc)) from exc
+            raise dbt.exceptions.DbtRuntimeError(
+                with_ducklake_metadata_hint(message=str(exc))
+            ) from exc
