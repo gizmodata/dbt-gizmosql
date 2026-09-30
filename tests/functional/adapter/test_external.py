@@ -3,15 +3,16 @@
 Covers feature parity with dbt-duckdb's external materialization tests
 (default parquet, CSV, JSON, custom location, format inference, delimiter,
 empty results, `ref()` from a downstream model) plus dbt-gizmosql-specific
-additions (plugin rejection, options dict, partitioning, S3 via MinIO — the
+additions (plugin rejection, options dict, partitioning, S3 via an S3 gateway — the
 exact examples shown in the README).
 
 All I/O runs server-side on the GizmoSQL container: the adapter writes files
 to the container's /tmp (and, in the S3 class, to an s3:// URI backed by a
-MinIO sidecar) and we verify the round-trip entirely through GizmoSQL queries.
+S3 gateway sidecar) and we verify the round-trip entirely through GizmoSQL queries.
 """
 import os
 import time
+import urllib.request
 from pathlib import Path
 from uuid import uuid4
 
@@ -482,48 +483,57 @@ class TestReadmePartitioned(BaseExternal):
         assert codec_set == {"zstd"}, f"expected zstd on all partitions, got {codec_set}"
 
 
-# -------------------- S3 (via MinIO) — end-to-end proof -------------------- #
+# ------------- S3 (via the Versity S3 Gateway) — end-to-end proof ------------- #
 
 
-MINIO_PORT = 9000
-MINIO_USER = "minioadmin"
-MINIO_PASSWORD = "minioadmin"
+# MinIO archived its open-source projects and its images are no longer
+# pullable (Docker Hub denies `minio/minio`, Quay answers 401), so — matching
+# the gizmosql repo's CI — the S3-compatible sidecar is the Apache-2.0
+# Versity S3 Gateway with a POSIX backend.
+S3_IMAGE = "versity/versitygw:v1.8.0"
+S3_CONTAINER_NAME = "dbt-gizmosql-test-s3"
+S3_PORT = 9000
+S3_ACCESS_KEY = "minioadmin"
+S3_SECRET_KEY = "minioadmin"
 S3_BUCKET = "dbt-gizmosql-test"
-MINIO_ENDPOINT = f"localhost:{MINIO_PORT}"
+S3_ENDPOINT = f"localhost:{S3_PORT}"
 
 
 @pytest.fixture(scope="class")
-def minio_server(tmp_path_factory):
-    """Spin up a MinIO container bound to localhost so the GizmoSQL subprocess
-    (also on localhost) can reach it as ``localhost:9000``.
+def s3_server(tmp_path_factory):
+    """Spin up an S3 gateway container bound to localhost so the GizmoSQL
+    subprocess (also on localhost) can reach it as ``localhost:9000``.
 
-    The bucket is pre-created via a tmpdir bind-mount, which doubles as the
+    The bucket is pre-created via a tmpdir bind-mount (the POSIX backend
+    serves each top-level directory as a bucket), which doubles as the
     host-side spy we use to verify that the server actually wrote objects.
+    Object metadata goes to a sidecar directory inside the container because
+    Docker Desktop bind mounts on macOS don't support the xattrs the gateway
+    uses by default.
     """
     client = docker.from_env()
 
-    # Drop any stale MinIO container from a prior aborted run.
+    # Drop any stale container from a prior aborted run.
     try:
-        existing = client.containers.get("dbt-gizmosql-test-minio")
+        existing = client.containers.get(S3_CONTAINER_NAME)
         existing.remove(force=True)
     except docker.errors.NotFound:
         pass
 
-    storage_root = tmp_path_factory.mktemp("minio-data")
+    storage_root = tmp_path_factory.mktemp("s3-data")
     bucket_dir = storage_root / S3_BUCKET
     bucket_dir.mkdir()
 
     container = client.containers.run(
-        image="minio/minio:latest",
-        name="dbt-gizmosql-test-minio",
-        command="server /data",
+        image=S3_IMAGE,
+        name=S3_CONTAINER_NAME,
+        command=["--port", f":{S3_PORT}", "--health", "/health", "posix", "--sidecar", "/tmp", "/data"],
         detach=True,
         remove=True,
-        tty=True,
-        ports={f"{MINIO_PORT}/tcp": MINIO_PORT},
+        ports={f"{S3_PORT}/tcp": S3_PORT},
         environment={
-            "MINIO_ROOT_USER": MINIO_USER,
-            "MINIO_ROOT_PASSWORD": MINIO_PASSWORD,
+            "ROOT_ACCESS_KEY": S3_ACCESS_KEY,
+            "ROOT_SECRET_KEY": S3_SECRET_KEY,
         },
         volumes={str(storage_root): {"bind": "/data", "mode": "rw"}},
     )
@@ -532,14 +542,17 @@ def minio_server(tmp_path_factory):
         deadline = time.time() + 30
         ready = False
         while time.time() < deadline:
-            logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
-            if "API:" in logs:
-                ready = True
+            try:
+                with urllib.request.urlopen(url=f"http://{S3_ENDPOINT}/health", timeout=2) as response:
+                    ready = response.status == 200
+            except OSError:
+                pass
+            if ready:
                 break
             time.sleep(0.5)
         if not ready:
             logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
-            raise TimeoutError(f"MinIO did not become ready in 30s. Last logs:\n{logs}")
+            raise TimeoutError(f"S3 gateway did not become ready in 30s. Last logs:\n{logs}")
 
         yield {"container": container, "storage_root": storage_root, "bucket_dir": bucket_dir}
     finally:
@@ -551,11 +564,11 @@ def minio_server(tmp_path_factory):
 
 class TestExternalS3(BaseExternal):
     """End-to-end proof that `external` materializations can write to an
-    S3-compatible object store (MinIO here). The GizmoSQL server installs
-    httpfs, creates a secret pointing at MinIO, and COPYs a parquet file to
+    S3-compatible object store (the Versity S3 Gateway here). The GizmoSQL
+    server installs httpfs, creates a secret pointing at the gateway, and COPYs a parquet file to
     s3://dbt-gizmosql-test/... entirely server-side. We then verify:
 
-      1. The object really landed in MinIO (host-side filesystem inspection).
+      1. The object really landed in the bucket (host-side filesystem inspection).
       2. GizmoSQL can read it back via `read_parquet('s3://...')`.
       3. The dbt view over the S3 object returns the expected rows.
     """
@@ -565,25 +578,27 @@ class TestExternalS3(BaseExternal):
         return f"run-{uuid4().hex[:8]}"
 
     @pytest.fixture(scope="class")
-    def external_root(self, minio_server, s3_prefix):
+    def external_root(self, s3_server, s3_prefix):
         return f"s3://{S3_BUCKET}/{s3_prefix}"
 
     @pytest.fixture(scope="class")
     def project_config_update(self, external_root):
         # Two server-side setup steps run before any model materializes:
         #   1. Install + load httpfs (DuckDB's S3 client extension).
-        #   2. Create a secret pointing the S3 client at the MinIO sidecar,
-        #      addressed by its docker network alias.
+        #   2. Create a secret pointing the S3 client at the S3 gateway
+        #      sidecar. REGION is required: DuckDB otherwise signs requests
+        #      with an empty region, which the gateway (like real S3) rejects.
         return {
             "on-run-start": [
                 "INSTALL httpfs",
                 "LOAD httpfs",
                 (
-                    "CREATE OR REPLACE SECRET minio_test ("
+                    "CREATE OR REPLACE SECRET s3_test ("
                     "  TYPE S3,"
-                    f"  KEY_ID '{MINIO_USER}',"
-                    f"  SECRET '{MINIO_PASSWORD}',"
-                    f"  ENDPOINT '{MINIO_ENDPOINT}',"
+                    f"  KEY_ID '{S3_ACCESS_KEY}',"
+                    f"  SECRET '{S3_SECRET_KEY}',"
+                    f"  ENDPOINT '{S3_ENDPOINT}',"
+                    "  REGION 'us-east-1',"
                     "  URL_STYLE 'path',"
                     "  USE_SSL false"
                     ")"
@@ -600,7 +615,7 @@ class TestExternalS3(BaseExternal):
             ),
         }
 
-    def test_s3_write_and_read(self, project, minio_server, s3_prefix):
+    def test_s3_write_and_read(self, project, s3_server, s3_prefix):
         results = _models(run_dbt(["run"]))
         assert len(results) == 1
         assert results[0].status == "success", results[0].message
@@ -608,8 +623,8 @@ class TestExternalS3(BaseExternal):
         check_relation_types(project.adapter, {"s3_model": "view"})
 
         # 1. The object really landed on the object store — verify by peeking
-        #    at the host directory backing the MinIO bucket.
-        bucket_dir: Path = minio_server["bucket_dir"]
+        #    at the host directory backing the bucket.
+        bucket_dir: Path = s3_server["bucket_dir"]
         written = sorted(p.relative_to(bucket_dir) for p in bucket_dir.rglob("*.parquet"))
         assert written, f"no parquet files found under {bucket_dir}"
         assert any(s3_prefix in str(p) for p in written), (

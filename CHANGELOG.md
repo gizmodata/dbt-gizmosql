@@ -27,6 +27,12 @@
   normalized for ingest: which results are streamed vs. materialized, that
   generators are consumed lazily, empty-stream handling, and error messages
   for iterables that aren't record batches.
+- The S3 `external` materialization test now runs its S3-compatible sidecar
+  on the [Versity S3 Gateway](https://github.com/versity/versitygw)
+  (`versity/versitygw:v1.8.0`, Apache-2.0) instead of MinIO, whose images are
+  no longer pullable (Docker Hub denies `minio/minio`; Quay answers 401) —
+  matching the gizmosql repo's CI. The test's S3 secret now sets `REGION`,
+  which the gateway (like real S3) requires.
 
 ## v1.12.2 (2026-09-11)
 
